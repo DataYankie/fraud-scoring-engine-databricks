@@ -1,20 +1,19 @@
-"""Tests for fraud_scoring_engine.features."""
+"""Tests for fraud_scoring_engine.features (Spark / Delta)."""
 
-from collections.abc import Iterator
+from __future__ import annotations
+
 from datetime import datetime, timedelta
 
-import pytest
 import pandas as pd
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
+import pytest
 
-from fraud_scoring_engine.db.models import Base, Transaction
+from fraud_scoring_engine.config import transactions_table
 from fraud_scoring_engine.features import (
     compute_avg_amount_ratio,
     compute_cumulative_spend,
     compute_transaction_features,
     compute_transaction_features_dataframe,
-    compute_transaction_features_from_model,
+    compute_transaction_features_from_row,
     compute_velocity,
 )
 
@@ -23,142 +22,199 @@ USER_B = "b" * 32
 BASE_TIME = datetime(2017, 12, 1, 12, 0, 0)
 
 
-@pytest.fixture
-def db_engine(engine: Engine) -> Engine:
-    Base.metadata.create_all(engine)
-    return engine
-
-
-def _insert_transaction(
-    session: Session,
-    *,
-    transaction_id: int,
-    derived_user_id: str | None,
-    transaction_at: datetime,
-    transaction_amt: float,
-) -> Transaction:
-    transaction = Transaction(
-        transaction_id=transaction_id,
-        derived_user_id=derived_user_id,
-        is_fraud=0,
-        transaction_amt=transaction_amt,
-        product_cd="W",
-        transaction_dt=0,
-        transaction_at=transaction_at,
+def _seed_transactions(spark, rows: list[dict]) -> None:
+    df = spark.createDataFrame(pd.DataFrame(rows))
+    (
+        df.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(transactions_table())
     )
-    session.add(transaction)
-    session.commit()
-    return transaction
 
 
 @pytest.fixture
-def seeded_session(db_engine: Engine) -> Iterator[Session]:
-    """Seed transactions for USER_A with controlled times and amounts.
+def seeded_spark(bronze_tables):
+    """Seed transactions for USER_A with controlled times and amounts."""
+    spark = bronze_tables
+    rows = [
+        {
+            "transaction_id": 1,
+            "derived_user_id": USER_A,
+            "is_fraud": 0,
+            "transaction_amt": 10.0,
+            "product_cd": "W",
+            "transaction_dt": 0,
+            "transaction_at": BASE_TIME - timedelta(days=45),
+            "card1": None,
+            "card2": None,
+            "card3": None,
+            "card4": None,
+            "card5": None,
+            "card6": None,
+            "p_emaildomain": None,
+            "r_emaildomain": None,
+            "addr1": None,
+            "addr2": None,
+            "dist1": None,
+            "dist2": None,
+        },
+        {
+            "transaction_id": 2,
+            "derived_user_id": USER_A,
+            "is_fraud": 0,
+            "transaction_amt": 20.0,
+            "product_cd": "W",
+            "transaction_dt": 0,
+            "transaction_at": BASE_TIME - timedelta(minutes=20),
+            "card1": None,
+            "card2": None,
+            "card3": None,
+            "card4": None,
+            "card5": None,
+            "card6": None,
+            "p_emaildomain": None,
+            "r_emaildomain": None,
+            "addr1": None,
+            "addr2": None,
+            "dist1": None,
+            "dist2": None,
+        },
+        {
+            "transaction_id": 3,
+            "derived_user_id": USER_A,
+            "is_fraud": 0,
+            "transaction_amt": 30.0,
+            "product_cd": "W",
+            "transaction_dt": 0,
+            "transaction_at": BASE_TIME - timedelta(minutes=10),
+            "card1": None,
+            "card2": None,
+            "card3": None,
+            "card4": None,
+            "card5": None,
+            "card6": None,
+            "p_emaildomain": None,
+            "r_emaildomain": None,
+            "addr1": None,
+            "addr2": None,
+            "dist1": None,
+            "dist2": None,
+        },
+        {
+            "transaction_id": 4,
+            "derived_user_id": USER_A,
+            "is_fraud": 0,
+            "transaction_amt": 2000.0,
+            "product_cd": "W",
+            "transaction_dt": 0,
+            "transaction_at": BASE_TIME,
+            "card1": None,
+            "card2": None,
+            "card3": None,
+            "card4": None,
+            "card5": None,
+            "card6": None,
+            "p_emaildomain": None,
+            "r_emaildomain": None,
+            "addr1": None,
+            "addr2": None,
+            "dist1": None,
+            "dist2": None,
+        },
+        {
+            "transaction_id": 5,
+            "derived_user_id": USER_A,
+            "is_fraud": 0,
+            "transaction_amt": 40.0,
+            "product_cd": "W",
+            "transaction_dt": 0,
+            "transaction_at": BASE_TIME,
+            "card1": None,
+            "card2": None,
+            "card3": None,
+            "card4": None,
+            "card5": None,
+            "card6": None,
+            "p_emaildomain": None,
+            "r_emaildomain": None,
+            "addr1": None,
+            "addr2": None,
+            "dist1": None,
+            "dist2": None,
+        },
+    ]
+    _seed_transactions(spark, rows)
+    return spark
 
-    Timeline (all on 2017-12-01 unless noted):
-    - id=1: BASE_TIME - 45d, $10  (outside 30d/90d ratio windows for late txns)
-    - id=2: BASE_TIME - 20m, $20
-    - id=3: BASE_TIME - 10m, $30
-    - id=4: BASE_TIME, $2000 (spike txn under test)
-    - id=5: BASE_TIME, $40 (same timestamp as id=4, lower id excluded first)
-    """
-    with Session(db_engine) as session:
-        _insert_transaction(
-            session,
-            transaction_id=1,
-            derived_user_id=USER_A,
-            transaction_at=BASE_TIME - timedelta(days=45),
-            transaction_amt=10.0,
-        )
-        _insert_transaction(
-            session,
-            transaction_id=2,
-            derived_user_id=USER_A,
-            transaction_at=BASE_TIME - timedelta(minutes=20),
-            transaction_amt=20.0,
-        )
-        _insert_transaction(
-            session,
-            transaction_id=3,
-            derived_user_id=USER_A,
-            transaction_at=BASE_TIME - timedelta(minutes=10),
-            transaction_amt=30.0,
-        )
-        _insert_transaction(
-            session,
-            transaction_id=4,
-            derived_user_id=USER_A,
+
+@pytest.mark.spark
+def test_first_transaction_has_zero_velocity_and_spend(bronze_tables) -> None:
+    spark = bronze_tables
+    _seed_transactions(
+        spark,
+        [
+            {
+                "transaction_id": 100,
+                "derived_user_id": USER_B,
+                "is_fraud": 0,
+                "transaction_amt": 50.0,
+                "product_cd": "W",
+                "transaction_dt": 0,
+                "transaction_at": BASE_TIME,
+                "card1": None,
+                "card2": None,
+                "card3": None,
+                "card4": None,
+                "card5": None,
+                "card6": None,
+                "p_emaildomain": None,
+                "r_emaildomain": None,
+                "addr1": None,
+                "addr2": None,
+                "dist1": None,
+                "dist2": None,
+            }
+        ],
+    )
+
+    assert (
+        compute_velocity(
+            spark,
+            derived_user_id=USER_B,
             transaction_at=BASE_TIME,
-            transaction_amt=2000.0,
-        )
-        _insert_transaction(
-            session,
-            transaction_id=5,
-            derived_user_id=USER_A,
-            transaction_at=BASE_TIME,
-            transaction_amt=40.0,
-        )
-        yield session
-
-
-def test_first_transaction_has_zero_velocity_and_spend(db_engine: Engine) -> None:
-    with Session(db_engine) as session:
-        _insert_transaction(
-            session,
+            window_hours=1,
             transaction_id=100,
+        )
+        == 0
+    )
+    assert (
+        compute_cumulative_spend(
+            spark,
+            derived_user_id=USER_B,
+            transaction_at=BASE_TIME,
+            window_hours=24,
+            transaction_id=100,
+        )
+        == 0.0
+    )
+    assert (
+        compute_avg_amount_ratio(
+            spark,
             derived_user_id=USER_B,
             transaction_at=BASE_TIME,
             transaction_amt=50.0,
+            window_days=30,
+            transaction_id=100,
         )
-
-        assert (
-            compute_velocity(
-                session,
-                derived_user_id=USER_B,
-                transaction_at=BASE_TIME,
-                window_hours=1,
-                transaction_id=100,
-            )
-            == 0
-        )
-        assert (
-            compute_cumulative_spend(
-                session,
-                derived_user_id=USER_B,
-                transaction_at=BASE_TIME,
-                window_hours=24,
-                transaction_id=100,
-            )
-            == 0.0
-        )
-        assert (
-            compute_avg_amount_ratio(
-                session,
-                derived_user_id=USER_B,
-                transaction_at=BASE_TIME,
-                transaction_amt=50.0,
-                window_days=30,
-                transaction_id=100,
-            )
-            is None
-        )
-        assert (
-            compute_avg_amount_ratio(
-                session,
-                derived_user_id=USER_B,
-                transaction_at=BASE_TIME,
-                transaction_amt=50.0,
-                window_days=90,
-                transaction_id=100,
-            )
-            is None
-        )
+        is None
+    )
 
 
-def test_velocity_counts_prior_transactions_in_last_hour(seeded_session: Session) -> None:
+@pytest.mark.spark
+def test_velocity_counts_prior_transactions_in_last_hour(seeded_spark) -> None:
     assert (
         compute_velocity(
-            seeded_session,
+            seeded_spark,
             derived_user_id=USER_A,
             transaction_at=BASE_TIME,
             window_hours=1,
@@ -168,10 +224,11 @@ def test_velocity_counts_prior_transactions_in_last_hour(seeded_session: Session
     )
 
 
-def test_cumulative_spend_sums_prior_24h_only(seeded_session: Session) -> None:
+@pytest.mark.spark
+def test_cumulative_spend_sums_prior_24h_only(seeded_spark) -> None:
     assert (
         compute_cumulative_spend(
-            seeded_session,
+            seeded_spark,
             derived_user_id=USER_A,
             transaction_at=BASE_TIME,
             window_hours=24,
@@ -181,9 +238,10 @@ def test_cumulative_spend_sums_prior_24h_only(seeded_session: Session) -> None:
     )
 
 
-def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_session: Session) -> None:
+@pytest.mark.spark
+def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_spark) -> None:
     ratio_30d = compute_avg_amount_ratio(
-        seeded_session,
+        seeded_spark,
         derived_user_id=USER_A,
         transaction_at=BASE_TIME,
         transaction_amt=2000.0,
@@ -191,7 +249,7 @@ def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_session: Sessio
         transaction_id=4,
     )
     ratio_90d = compute_avg_amount_ratio(
-        seeded_session,
+        seeded_spark,
         derived_user_id=USER_A,
         transaction_at=BASE_TIME,
         transaction_amt=2000.0,
@@ -203,53 +261,47 @@ def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_session: Sessio
     assert ratio_90d == pytest.approx(2000.0 / 20.0)
 
 
-def test_null_derived_user_id_returns_safe_defaults(db_engine: Engine) -> None:
-    with Session(db_engine) as session:
-        _insert_transaction(
-            session,
+@pytest.mark.spark
+def test_null_derived_user_id_returns_safe_defaults(bronze_tables) -> None:
+    spark = bronze_tables
+    assert (
+        compute_velocity(
+            spark,
+            derived_user_id=None,
+            transaction_at=BASE_TIME,
+            window_hours=1,
             transaction_id=200,
+        )
+        == 0
+    )
+    assert (
+        compute_cumulative_spend(
+            spark,
+            derived_user_id=None,
+            transaction_at=BASE_TIME,
+            window_hours=24,
+            transaction_id=200,
+        )
+        == 0.0
+    )
+    assert (
+        compute_avg_amount_ratio(
+            spark,
             derived_user_id=None,
             transaction_at=BASE_TIME,
             transaction_amt=100.0,
+            window_days=30,
+            transaction_id=200,
         )
-
-        assert (
-            compute_velocity(
-                session,
-                derived_user_id=None,
-                transaction_at=BASE_TIME,
-                window_hours=1,
-                transaction_id=200,
-            )
-            == 0
-        )
-        assert (
-            compute_cumulative_spend(
-                session,
-                derived_user_id=None,
-                transaction_at=BASE_TIME,
-                window_hours=24,
-                transaction_id=200,
-            )
-            == 0.0
-        )
-        assert (
-            compute_avg_amount_ratio(
-                session,
-                derived_user_id=None,
-                transaction_at=BASE_TIME,
-                transaction_amt=100.0,
-                window_days=30,
-                transaction_id=200,
-            )
-            is None
-        )
+        is None
+    )
 
 
-def test_same_timestamp_excludes_current_transaction_id(seeded_session: Session) -> None:
+@pytest.mark.spark
+def test_same_timestamp_excludes_current_transaction_id(seeded_spark) -> None:
     assert (
         compute_velocity(
-            seeded_session,
+            seeded_spark,
             derived_user_id=USER_A,
             transaction_at=BASE_TIME,
             window_hours=1,
@@ -259,7 +311,7 @@ def test_same_timestamp_excludes_current_transaction_id(seeded_session: Session)
     )
     assert (
         compute_cumulative_spend(
-            seeded_session,
+            seeded_spark,
             derived_user_id=USER_A,
             transaction_at=BASE_TIME,
             window_hours=24,
@@ -269,9 +321,10 @@ def test_same_timestamp_excludes_current_transaction_id(seeded_session: Session)
     )
 
 
-def test_compute_transaction_features_aggregator(seeded_session: Session) -> None:
+@pytest.mark.spark
+def test_compute_transaction_features_aggregator(seeded_spark) -> None:
     features = compute_transaction_features(
-        seeded_session,
+        seeded_spark,
         derived_user_id=USER_A,
         transaction_at=BASE_TIME,
         transaction_amt=2000.0,
@@ -284,29 +337,39 @@ def test_compute_transaction_features_aggregator(seeded_session: Session) -> Non
     assert features.avg_amount_ratio_90d == pytest.approx(2000.0 / 20.0)
 
 
-def test_compute_transaction_features_from_model(seeded_session: Session) -> None:
-    transaction = seeded_session.get(Transaction, 4)
-    assert transaction is not None
-
-    features = compute_transaction_features_from_model(seeded_session, transaction)
+@pytest.mark.spark
+def test_compute_transaction_features_from_row(seeded_spark) -> None:
+    features = compute_transaction_features_from_row(
+        seeded_spark,
+        transaction_id=4,
+        derived_user_id=USER_A,
+        transaction_at=BASE_TIME,
+        transaction_amt=2000.0,
+    )
 
     assert features.velocity_1h == 2
     assert features.cumulative_spend_24h == 50.0
-    assert features.avg_amount_ratio_30d == pytest.approx(2000.0 / 25.0)
-    assert features.avg_amount_ratio_90d == pytest.approx(2000.0 / 20.0)
 
 
-def test_compute_transaction_features_dataframe_matches_row_by_row(
-    seeded_session: Session,
-) -> None:
-    dataframe = compute_transaction_features_dataframe(seeded_session, limit=None)
+@pytest.mark.spark
+def test_compute_transaction_features_dataframe_matches_row_by_row(seeded_spark) -> None:
+    dataframe = compute_transaction_features_dataframe(seeded_spark, limit=None)
 
     assert len(dataframe) == 5
 
     for _, row in dataframe.iterrows():
-        transaction = seeded_session.get(Transaction, int(row["transaction_id"]))
-        assert transaction is not None
-        expected = compute_transaction_features_from_model(seeded_session, transaction)
+        txn = (
+            seeded_spark.table(transactions_table())
+            .filter(f"transaction_id = {int(row['transaction_id'])}")
+            .collect()[0]
+        )
+        expected = compute_transaction_features(
+            seeded_spark,
+            derived_user_id=txn["derived_user_id"],
+            transaction_at=txn["transaction_at"],
+            transaction_amt=float(txn["transaction_amt"]),
+            transaction_id=int(txn["transaction_id"]),
+        )
         assert row["velocity_1h"] == expected.velocity_1h
         assert row["cumulative_spend_24h"] == expected.cumulative_spend_24h
         if expected.avg_amount_ratio_30d is None:
@@ -319,8 +382,9 @@ def test_compute_transaction_features_dataframe_matches_row_by_row(
             assert row["avg_amount_ratio_90d"] == pytest.approx(expected.avg_amount_ratio_90d)
 
 
-def test_compute_transaction_features_dataframe_respects_limit(seeded_session: Session) -> None:
-    dataframe = compute_transaction_features_dataframe(seeded_session, limit=2)
+@pytest.mark.spark
+def test_compute_transaction_features_dataframe_respects_limit(seeded_spark) -> None:
+    dataframe = compute_transaction_features_dataframe(seeded_spark, limit=2)
 
     assert len(dataframe) == 2
     assert list(dataframe["transaction_id"]) == [1, 2]

@@ -1,20 +1,20 @@
-"""Ingest IEEE-CIS train transactions into PostgreSQL and Parquet.
+"""Ingest IEEE-CIS train transactions into Unity Catalog Delta tables.
 
 Usage:
-    uv run python scripts/ingest_ieee_transactions.py --limit 10000
-    uv run python scripts/ingest_ieee_transactions.py
-    uv run python scripts/ingest_ieee_transactions.py --limit 100 --dry-run
-    uv run python scripts/ingest_ieee_transactions.py --skip-db --limit 10000
-    uv run python scripts/ingest_ieee_transactions.py --skip-parquet
+    python scripts/ingest_ieee_transactions.py --limit 10000
+    python scripts/ingest_ieee_transactions.py
+    python scripts/ingest_ieee_transactions.py --limit 100 --dry-run
+    python scripts/ingest_ieee_transactions.py --skip-tables --limit 10000
+    python scripts/ingest_ieee_transactions.py --skip-features
 
-Writes operational columns to PostgreSQL and all other CSV columns to
-``data/processed/train_features.parquet`` (same row slice as ``--limit``).
+Merges operational columns into ``fraud.bronze.transactions`` /
+``fraud.bronze.transaction_identities`` and overwrites
+``fraud.bronze.train_features`` with the remaining CSV columns.
 
 Prerequisites:
-    - Raw CSVs in data/raw/ (see scripts/download_ieee_fraud_data.py)
-    - PostgreSQL running (docker-compose up -d) when not using ``--skip-db``
-    - POSTGRES_PASSWORD or DATABASE_URL set (see env_local.ps1)
-    - Schema applied: alembic upgrade head
+    - Raw CSVs in /Volumes/fraud/bronze/data/raw/ (see download_ieee_fraud_data.py)
+    - Cluster with Spark + Delta (Databricks Runtime)
+    - Package installed: %pip install -e .
 """
 
 from __future__ import annotations
@@ -28,7 +28,8 @@ from fraud_scoring_engine.ingest.loader import ingest_train_transactions
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Ingest IEEE-CIS train data into PostgreSQL and export ML features to Parquet."
+            "Ingest IEEE-CIS train data into bronze Delta tables "
+            "(transactions, identities, train_features)."
         ),
     )
     parser.add_argument(
@@ -41,40 +42,28 @@ def parse_args() -> argparse.Namespace:
         "--data-dir",
         type=Path,
         default=None,
-        help="Path to data/raw (default: {repo}/data/raw).",
+        help="Path to raw CSVs (default: /Volumes/fraud/bronze/data/raw).",
     )
     parser.add_argument(
         "--processed-dir",
         type=Path,
         default=None,
-        help="Path to data/processed (default: {repo}/data/processed).",
-    )
-    parser.add_argument(
-        "--parquet-out",
-        type=Path,
-        default=None,
-        help="Output Parquet path (default: {repo}/data/processed/train_features.parquet).",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=5000,
-        help="Rows per database commit batch (default: 5000).",
+        help="Unused for Delta feature writes; retained for CLI compatibility.",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Read and transform only; do not write to Postgres or Parquet.",
+        help="Read and transform only; do not write Delta tables.",
     )
     parser.add_argument(
-        "--skip-db",
+        "--skip-tables",
         action="store_true",
-        help="Export Parquet only; skip PostgreSQL ingest.",
+        help="Write train_features only; skip transactions/identities MERGE.",
     )
     parser.add_argument(
-        "--skip-parquet",
+        "--skip-features",
         action="store_true",
-        help="Ingest PostgreSQL only; skip Parquet export.",
+        help="MERGE operational tables only; skip train_features overwrite.",
     )
     return parser.parse_args()
 
@@ -84,12 +73,10 @@ def main() -> None:
     ingest_train_transactions(
         data_dir=args.data_dir,
         processed_dir=args.processed_dir,
-        parquet_path=args.parquet_out,
         limit=args.limit,
-        batch_size=args.batch_size,
         dry_run=args.dry_run,
-        skip_db=args.skip_db,
-        skip_parquet=args.skip_parquet,
+        skip_tables=args.skip_tables,
+        skip_features=args.skip_features,
     )
 
 

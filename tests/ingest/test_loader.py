@@ -1,26 +1,24 @@
-"""Tests for fraud_scoring_engine.ingest.loader."""
+"""Spark/Delta tests for fraud_scoring_engine.ingest.loader."""
 
-from datetime import datetime
+from __future__ import annotations
+
+from pathlib import Path
 
 import pandas as pd
 import pytest
-from sqlalchemy import func, select
-from sqlalchemy.engine import Engine
-from sqlalchemy.orm import Session
 
-from fraud_scoring_engine.db.models import Base, Transaction, TransactionIdentity
-from fraud_scoring_engine.ingest.loader import _ingest_to_postgres
+from fraud_scoring_engine.config import (
+    train_features_table,
+    transaction_identities_table,
+    transactions_table,
+)
+from fraud_scoring_engine.ingest.loader import ingest_train_transactions
 from fraud_scoring_engine.ingest.transforms import generate_user_id_from_components
 
 
-@pytest.fixture
-def db_engine(engine: Engine) -> Engine:
-    Base.metadata.create_all(engine)
-    return engine
-
-
-def _sample_merged() -> pd.DataFrame:
-    return pd.DataFrame(
+def _write_sample_csvs(raw_dir: Path) -> None:
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    transactions = pd.DataFrame(
         [
             {
                 "TransactionID": 2987000,
@@ -40,10 +38,7 @@ def _sample_merged() -> pd.DataFrame:
                 "addr2": 87.0,
                 "dist1": 19.0,
                 "dist2": None,
-                "id_30": "Windows 10",
-                "id_31": "chrome 63.0",
-                "DeviceType": "desktop",
-                "DeviceInfo": "Windows",
+                "V1": 0.1,
             },
             {
                 "TransactionID": 2987001,
@@ -63,86 +58,100 @@ def _sample_merged() -> pd.DataFrame:
                 "addr2": 87.0,
                 "dist1": None,
                 "dist2": None,
-                "id_30": None,
-                "id_31": None,
-                "DeviceType": None,
-                "DeviceInfo": None,
+                "V1": 0.2,
             },
         ]
     )
-
-
-def test_ingest_to_postgres_inserts_transactions_and_identities(
-    db_engine: Engine,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "fraud_scoring_engine.ingest.loader.create_db_engine",
-        lambda: db_engine,
-    )
-    merged = _sample_merged()
-
-    rows_inserted, rows_skipped, identities_inserted = _ingest_to_postgres(
-        merged,
-        batch_size=5000,
-    )
-
-    assert rows_inserted == 2
-    assert rows_skipped == 0
-    assert identities_inserted == 1
-
-    with Session(db_engine) as session:
-        transaction = session.get(Transaction, 2987000)
-        assert transaction is not None
-        assert transaction.is_fraud == 0
-        assert transaction.transaction_at == datetime(2017, 12, 1)
-        assert transaction.derived_user_id == generate_user_id_from_components(
+    identities = pd.DataFrame(
+        [
             {
-                "card1": 13926.0,
-                "card2": None,
-                "card3": 150.0,
-                "card4": "discover",
-                "card5": 142.0,
-                "card6": "credit",
-                "addr1": 315.0,
-                "addr2": 87.0,
+                "TransactionID": 2987000,
+                "id_30": "Windows 10",
+                "id_31": "chrome 63.0",
+                "DeviceType": "desktop",
+                "DeviceInfo": "Windows",
+                "id_01": 1.0,
             }
-        )
-
-        identity = session.get(TransactionIdentity, 2987000)
-        assert identity is not None
-        assert identity.device_type == "desktop"
-
-        missing_identity = session.get(TransactionIdentity, 2987001)
-        assert missing_identity is None
+        ]
+    )
+    transactions.to_csv(raw_dir / "train_transaction.csv", index=False)
+    identities.to_csv(raw_dir / "train_identity.csv", index=False)
 
 
-def test_ingest_to_postgres_skips_existing_transactions(
-    db_engine: Engine,
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.spark
+def test_ingest_merges_transactions_identities_and_features(
+    bronze_tables,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "fraud_scoring_engine.ingest.loader.create_db_engine",
-        lambda: db_engine,
-    )
-    merged = _sample_merged()
+    spark = bronze_tables
+    raw = tmp_path / "raw"
+    _write_sample_csvs(raw)
 
-    first_inserted, first_skipped, first_identities = _ingest_to_postgres(
-        merged,
-        batch_size=5000,
-    )
-    second_inserted, second_skipped, second_identities = _ingest_to_postgres(
-        merged,
-        batch_size=5000,
+    result = ingest_train_transactions(
+        spark=spark,
+        data_dir=raw,
+        ensure_tables=False,
     )
 
-    assert first_inserted == 2
-    assert first_skipped == 0
-    assert first_identities == 1
-    assert second_inserted == 0
-    assert second_skipped == 2
-    assert second_identities == 0
+    assert result.rows_read == 2
+    assert result.rows_merged == 2
+    assert result.identities_merged == 1
+    assert result.feature_rows == 2
+    assert result.features_table == train_features_table()
 
-    with Session(db_engine) as session:
-        count = session.scalar(select(func.count()).select_from(Transaction))
-        assert count == 2
+    txns = spark.table(transactions_table()).orderBy("transaction_id").collect()
+    assert len(txns) == 2
+    assert txns[0]["transaction_id"] == 2987000
+    expected_uid = generate_user_id_from_components(
+        {
+            "card1": 13926.0,
+            "card2": None,
+            "card3": 150.0,
+            "card4": "discover",
+            "card5": 142.0,
+            "card6": "credit",
+            "addr1": 315.0,
+            "addr2": 87.0,
+        }
+    )
+    assert txns[0]["derived_user_id"] == expected_uid
+
+    identities = spark.table(transaction_identities_table()).collect()
+    assert len(identities) == 1
+    assert identities[0]["device_type"] == "desktop"
+
+    features = spark.table(train_features_table())
+    assert "TransactionID" in features.columns
+    assert "V1" in features.columns
+    assert "isFraud" not in features.columns
+    assert features.count() == 2
+
+
+@pytest.mark.spark
+def test_ingest_merge_is_idempotent(bronze_tables, tmp_path: Path) -> None:
+    spark = bronze_tables
+    raw = tmp_path / "raw"
+    _write_sample_csvs(raw)
+
+    ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
+    ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
+
+    assert spark.table(transactions_table()).count() == 2
+    assert spark.table(transaction_identities_table()).count() == 1
+
+
+@pytest.mark.spark
+def test_ingest_dry_run_writes_nothing(bronze_tables, tmp_path: Path) -> None:
+    spark = bronze_tables
+    raw = tmp_path / "raw"
+    _write_sample_csvs(raw)
+
+    result = ingest_train_transactions(
+        spark=spark,
+        data_dir=raw,
+        dry_run=True,
+        ensure_tables=False,
+    )
+    assert result.rows_read == 2
+    assert result.rows_merged == 0
+    assert spark.table(transactions_table()).count() == 0

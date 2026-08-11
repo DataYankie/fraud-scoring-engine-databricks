@@ -1,4 +1,4 @@
-"""Transform IEEE-CIS DataFrames for PostgreSQL bulk ingest."""
+"""Transform IEEE-CIS DataFrames (pandas helpers + shared constants)."""
 
 from __future__ import annotations
 

@@ -1,29 +1,56 @@
-"""Orchestrate IEEE CSV ingestion into PostgreSQL and Parquet."""
+"""Orchestrate IEEE CSV ingestion into Unity Catalog Delta tables."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
 
-import pandas as pd
-from sqlalchemy import insert, select
-from sqlalchemy.orm import Session
+from pyspark.sql import DataFrame, SparkSession
 
-from fraud_scoring_engine.db.engine import create_db_engine
-from fraud_scoring_engine.db.models import Transaction, TransactionIdentity
-from fraud_scoring_engine.ingest.columns import database_columns, split_parquet_features
-from fraud_scoring_engine.ingest.exporter import write_train_features_parquet
+from fraud_scoring_engine.config import (
+    train_features_table,
+    transaction_identities_table,
+    transactions_table,
+)
+from fraud_scoring_engine.delta.schema import ensure_bronze_tables
 from fraud_scoring_engine.ingest.paths import IeeeDataPaths, ieee_data_paths
-from fraud_scoring_engine.ingest.reader import load_merged_train_data_full
-from fraud_scoring_engine.ingest.transforms import (
-    count_identity_rows,
-    prepare_identities_df,
-    prepare_transactions_df,
+from fraud_scoring_engine.ingest.spark_transforms import (
+    count_identity_rows_spark,
+    prepare_identities_spark,
+    prepare_transactions_spark,
+    split_train_features_spark,
+)
+from fraud_scoring_engine.spark_session import get_spark
+
+TRANSACTION_MERGE_COLUMNS = (
+    "transaction_id",
+    "derived_user_id",
+    "is_fraud",
+    "transaction_amt",
+    "product_cd",
+    "transaction_dt",
+    "transaction_at",
+    "card1",
+    "card2",
+    "card3",
+    "card4",
+    "card5",
+    "card6",
+    "p_emaildomain",
+    "r_emaildomain",
+    "addr1",
+    "addr2",
+    "dist1",
+    "dist2",
 )
 
-EXISTING_ID_LOOKUP_BATCH = 10_000
+IDENTITY_MERGE_COLUMNS = (
+    "transaction_id",
+    "id_30",
+    "id_31",
+    "device_type",
+    "device_info",
+)
 
 
 @dataclass(frozen=True)
@@ -31,202 +58,190 @@ class IngestResult:
     """Summary counts from an ingest run."""
 
     rows_read: int
-    rows_inserted: int
-    rows_skipped: int
-    identities_inserted: int
-    parquet_rows: int
-    parquet_path: Path | None
+    rows_merged: int
+    identities_merged: int
+    feature_rows: int
+    features_table: str | None
 
 
-def _existing_transaction_ids(session: Session, transaction_ids: list[int]) -> set[int]:
-    if not transaction_ids:
-        return set()
-    stmt = select(Transaction.transaction_id).where(
-        Transaction.transaction_id.in_(transaction_ids)
+def _read_csv(spark: SparkSession, path: Path) -> DataFrame:
+    if not path.exists():
+        raise FileNotFoundError(f"Required CSV not found: {path}")
+    return (
+        spark.read.option("header", True)
+        .option("inferSchema", True)
+        .csv(str(path))
     )
-    return set(session.scalars(stmt).all())
 
 
-def _lookup_existing_transaction_ids(
-    session: Session,
-    transaction_ids: list[int],
+def load_merged_train_spark(
+    spark: SparkSession,
+    transaction_path: Path,
+    identity_path: Path,
     *,
-    lookup_batch_size: int = EXISTING_ID_LOOKUP_BATCH,
-) -> set[int]:
-    existing: set[int] = set()
-    for start in range(0, len(transaction_ids), lookup_batch_size):
-        batch_ids = transaction_ids[start : start + lookup_batch_size]
-        existing |= _existing_transaction_ids(session, batch_ids)
-    return existing
+    limit: int | None = None,
+) -> DataFrame:
+    """Load and left-join train transaction and identity CSVs with Spark."""
+    transactions = _read_csv(spark, transaction_path)
+    if limit is not None:
+        transactions = transactions.limit(limit)
+    identities = _read_csv(spark, identity_path)
+    return transactions.join(identities, on="TransactionID", how="left")
 
 
-def _bulk_insert_records(
-    session: Session,
-    table,
-    records: list[Mapping[str, Any]],
+def _merge_delta(
+    spark: SparkSession,
+    source: DataFrame,
     *,
-    batch_size: int,
+    target_table: str,
+    key: str,
+    columns: tuple[str, ...],
 ) -> int:
-    inserted = 0
-    for start in range(0, len(records), batch_size):
-        batch = records[start : start + batch_size]
-        if not batch:
-            continue
-        session.execute(insert(table), batch)
-        session.commit()
-        inserted += len(batch)
-    return inserted
+    """MERGE ``source`` into ``target_table`` on ``key``; return source row count."""
+    count = source.count()
+    if count == 0:
+        return 0
+
+    view = f"_ingest_source_{target_table.replace('.', '_')}"
+    source.createOrReplaceTempView(view)
+
+    set_clause = ", ".join(f"t.{col} = s.{col}" for col in columns if col != key)
+    insert_cols = ", ".join(columns)
+    insert_vals = ", ".join(f"s.{col}" for col in columns)
+
+    spark.sql(
+        f"""
+        MERGE INTO {target_table} AS t
+        USING {view} AS s
+        ON t.{key} = s.{key}
+        WHEN MATCHED THEN UPDATE SET {set_clause}
+        WHEN NOT MATCHED THEN INSERT ({insert_cols}) VALUES ({insert_vals})
+        """
+    )
+    return count
 
 
-def _ingest_to_postgres(
-    merged: pd.DataFrame,
-    *,
-    batch_size: int,
-) -> tuple[int, int, int]:
-    rows_read = len(merged)
-    transactions_df = prepare_transactions_df(merged)
-    identities_df = prepare_identities_df(merged)
-
-    engine = create_db_engine()
-    with Session(engine) as session:
-        incoming_ids = transactions_df["transaction_id"].astype(int).tolist()
-        existing = _lookup_existing_transaction_ids(session, incoming_ids)
-        rows_skipped = len(existing)
-
-        to_insert = transactions_df[~transactions_df["transaction_id"].isin(existing)]
-        inserted_ids = set(to_insert["transaction_id"].astype(int).tolist())
-        identities_to_insert = identities_df[
-            identities_df["transaction_id"].isin(inserted_ids)
-        ]
-
-        transaction_records = cast(
-            list[Mapping[str, Any]],
-            to_insert.to_dict(orient="records"),
-        )
-        identity_records = cast(
-            list[Mapping[str, Any]],
-            identities_to_insert.to_dict(orient="records"),
-        )
-
-        rows_inserted = _bulk_insert_records(
-            session,
-            Transaction.__table__,
-            transaction_records,
-            batch_size=batch_size,
-        )
-        identities_inserted = _bulk_insert_records(
-            session,
-            TransactionIdentity.__table__,
-            identity_records,
-            batch_size=batch_size,
-        )
-
-    return rows_inserted, rows_skipped, identities_inserted
+def _overwrite_features(spark: SparkSession, features: DataFrame, table: str) -> int:
+    count = features.count()
+    (
+        features.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(table)
+    )
+    return count
 
 
 def ingest_train_transactions(
     *,
+    spark: SparkSession | None = None,
     data_dir: Path | None = None,
     processed_dir: Path | None = None,
-    parquet_path: Path | None = None,
     limit: int | None = None,
-    batch_size: int = 5000,
     dry_run: bool = False,
-    skip_db: bool = False,
-    skip_parquet: bool = False,
+    skip_tables: bool = False,
+    skip_features: bool = False,
+    ensure_tables: bool = True,
 ) -> IngestResult:
-    """Load train IEEE data from CSV into PostgreSQL and/or Parquet.
+    """Load train IEEE data from Volume CSVs into bronze Delta tables.
 
-    Postgres receives the operational column subset. All remaining CSV columns
-    (plus ``TransactionID`` as join key) are written to a single Parquet file.
+    Operational columns are MERGEd into ``transactions`` / ``transaction_identities``.
+    Remaining CSV columns (plus ``TransactionID``) overwrite ``train_features``.
 
     Args:
-        data_dir: Optional override for ``data/raw``.
-        processed_dir: Optional override for ``data/processed``.
-        parquet_path: Optional override for the output Parquet file.
+        spark: Optional SparkSession; defaults to :func:`get_spark`.
+        data_dir: Optional override for Volume ``raw/``.
+        processed_dir: Optional override for Volume ``processed/`` (unused for
+            Delta feature writes; retained for CLI compatibility).
         limit: If set, process only the first ``limit`` transaction rows.
-        batch_size: Number of rows per database commit batch.
-        dry_run: If True, report counts only; do not write Postgres or Parquet.
-        skip_db: If True, export Parquet only.
-        skip_parquet: If True, ingest Postgres only.
+        dry_run: If True, report counts only; do not write Delta tables.
+        skip_tables: If True, write train_features only.
+        skip_features: If True, MERGE operational tables only.
+        ensure_tables: If True, create bronze schema/tables when missing.
 
     Returns:
         Summary counts for the ingest run.
-
-    Raises:
-        FileNotFoundError: If required CSV files are missing.
-        ValueError: If both ``skip_db`` and ``skip_parquet`` are True.
     """
-    if skip_db and skip_parquet:
-        msg = "At least one of Postgres ingest or Parquet export must be enabled"
+    del processed_dir  # Volume processed path reserved; features go to Delta.
+
+    if skip_tables and skip_features:
+        msg = "At least one of Delta table ingest or train_features write must be enabled"
         raise ValueError(msg)
 
-    paths: IeeeDataPaths = ieee_data_paths(
-        data_dir,
-        processed_dir=processed_dir,
-        parquet_path=parquet_path,
-    )
+    session = spark if spark is not None else get_spark()
+    paths: IeeeDataPaths = ieee_data_paths(data_dir)
 
-    merged_full = load_merged_train_data_full(
+    if ensure_tables and not dry_run:
+        ensure_bronze_tables(session)
+
+    merged = load_merged_train_spark(
+        session,
         paths.train_transaction,
         paths.train_identity,
         limit=limit,
     )
-    merged = merged_full[database_columns(merged_full)].copy()
-    rows_read = len(merged)
+    rows_read = merged.count()
 
-    parquet_rows = 0
-    output_parquet: Path | None = None
-    rows_inserted = 0
-    rows_skipped = 0
-    identities_inserted = 0
+    feature_rows = 0
+    features_table_name: str | None = None
+    rows_merged = 0
+    identities_merged = 0
 
-    if not skip_parquet:
-        features = split_parquet_features(merged_full)
-        parquet_rows = len(features)
-        output_parquet = paths.train_features_parquet
+    if not skip_features:
+        features = split_train_features_spark(merged)
+        feature_rows = features.count()
+        features_table_name = train_features_table()
         if not dry_run:
-            write_train_features_parquet(features, output_parquet)
+            _overwrite_features(session, features, features_table_name)
 
     if dry_run:
-        identity_count = count_identity_rows(merged)
+        identity_count = count_identity_rows_spark(merged)
         print(
             f"Dry run: {rows_read} transactions, {identity_count} with identity data, "
-            f"{parquet_rows} parquet feature rows"
+            f"{feature_rows} train_features rows"
         )
-        if output_parquet is not None:
-            print(f"Parquet target: {output_parquet}")
+        if features_table_name is not None:
+            print(f"train_features target: {features_table_name}")
         return IngestResult(
             rows_read=rows_read,
-            rows_inserted=0,
-            rows_skipped=0,
-            identities_inserted=identity_count,
-            parquet_rows=parquet_rows,
-            parquet_path=output_parquet,
+            rows_merged=0,
+            identities_merged=identity_count,
+            feature_rows=feature_rows,
+            features_table=features_table_name,
         )
 
-    if not skip_db:
-        rows_inserted, rows_skipped, identities_inserted = _ingest_to_postgres(
-            merged,
-            batch_size=batch_size,
+    if not skip_tables:
+        transactions_df = prepare_transactions_spark(merged)
+        identities_df = prepare_identities_spark(merged)
+        rows_merged = _merge_delta(
+            session,
+            transactions_df,
+            target_table=transactions_table(),
+            key="transaction_id",
+            columns=TRANSACTION_MERGE_COLUMNS,
+        )
+        identities_merged = _merge_delta(
+            session,
+            identities_df,
+            target_table=transaction_identities_table(),
+            key="transaction_id",
+            columns=IDENTITY_MERGE_COLUMNS,
         )
 
     parts = [
         f"read={rows_read}",
-        f"inserted={rows_inserted}",
-        f"skipped={rows_skipped}",
-        f"identities={identities_inserted}",
+        f"merged={rows_merged}",
+        f"identities={identities_merged}",
     ]
-    if not skip_parquet:
-        parts.append(f"parquet_rows={parquet_rows}")
-        parts.append(f"parquet_path={output_parquet}")
+    if not skip_features:
+        parts.append(f"feature_rows={feature_rows}")
+        parts.append(f"features_table={features_table_name}")
     print(f"Ingest complete: {', '.join(parts)}")
 
     return IngestResult(
         rows_read=rows_read,
-        rows_inserted=rows_inserted,
-        rows_skipped=rows_skipped,
-        identities_inserted=identities_inserted,
-        parquet_rows=parquet_rows,
-        parquet_path=output_parquet,
+        rows_merged=rows_merged,
+        identities_merged=identities_merged,
+        feature_rows=feature_rows,
+        features_table=features_table_name,
     )

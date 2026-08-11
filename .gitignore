@@ -221,3 +221,6 @@ __marimo__/
 .vscode/
 env_local.ps1
 data/
+spark-warehouse/
+metastore_db/
+derby.log

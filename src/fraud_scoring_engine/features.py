@@ -1,176 +1,118 @@
-"""SQLAlchemy queries for per-transaction fraud scoring features."""
+"""Spark/Delta queries for per-transaction fraud scoring features."""
 
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
-from decimal import Decimal
 
 import pandas as pd
-from sqlalchemy import and_, func, or_, select
-from sqlalchemy.orm import Session
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
 
-from fraud_scoring_engine.db.models import Transaction
+from fraud_scoring_engine.config import behavioral_features_table, transactions_table
+from fraud_scoring_engine.delta.schema import ensure_bronze_tables
+from fraud_scoring_engine.spark_session import get_spark
 
 
-def _prior_transaction_filters(
+def _prior_filter(
+    spark: SparkSession,
     *,
     derived_user_id: str,
     transaction_at: datetime,
     window: timedelta,
     transaction_id: int | None = None,
-) -> list:
-    """Build SQLAlchemy filters for prior transactions within a rolling window.
-
-    The current transaction is excluded. When ``transaction_id`` is provided,
-    same-timestamp rows with a lower ID are treated as prior transactions.
-
-    Args:
-        derived_user_id: Synthetic user identifier to match.
-        transaction_at: Anchor timestamp for the window.
-        window: Lookback duration before ``transaction_at``.
-        transaction_id: Optional current transaction ID for tie-breaking.
-
-    Returns:
-        List of SQLAlchemy filter expressions.
-    """
+    table: str | None = None,
+) -> DataFrame:
+    """Return prior transactions for a user within a rolling window."""
+    target = table or transactions_table()
     window_start = transaction_at - window
-    filters = [
-        Transaction.derived_user_id == derived_user_id,
-        Transaction.transaction_at >= window_start,
-    ]
+    df = spark.table(target).filter(
+        (F.col("derived_user_id") == derived_user_id)
+        & (F.col("transaction_at") >= F.lit(window_start))
+    )
     if transaction_id is not None:
-        filters.append(
-            or_(
-                Transaction.transaction_at < transaction_at,
-                and_(
-                    Transaction.transaction_at == transaction_at,
-                    Transaction.transaction_id < transaction_id,
-                ),
+        df = df.filter(
+            (F.col("transaction_at") < F.lit(transaction_at))
+            | (
+                (F.col("transaction_at") == F.lit(transaction_at))
+                & (F.col("transaction_id") < F.lit(transaction_id))
             )
         )
     else:
-        filters.append(Transaction.transaction_at < transaction_at)
-    return filters
+        df = df.filter(F.col("transaction_at") < F.lit(transaction_at))
+    return df
 
 
 def compute_velocity(
-    session: Session,
+    spark: SparkSession,
     *,
     derived_user_id: str | None,
     transaction_at: datetime,
     window_hours: int,
     transaction_id: int | None = None,
+    table: str | None = None,
 ) -> int:
-    """Count prior transactions by a user within a rolling hour window.
-
-    Args:
-        session: Active SQLAlchemy ORM session.
-        derived_user_id: Synthetic user identifier; returns ``0`` when ``None``.
-        transaction_at: Anchor timestamp for the window.
-        window_hours: Lookback duration in hours.
-        transaction_id: Optional current transaction ID for tie-breaking.
-
-    Returns:
-        Number of qualifying prior transactions.
-    """
+    """Count prior transactions by a user within a rolling hour window."""
     if derived_user_id is None:
         return 0
-
-    stmt = (
-        select(func.count())
-        .select_from(Transaction)
-        .where(
-            *_prior_transaction_filters(
-                derived_user_id=derived_user_id,
-                transaction_at=transaction_at,
-                window=timedelta(hours=window_hours),
-                transaction_id=transaction_id,
-            )
-        )
-    )
-    return int(session.scalar(stmt) or 0)
+    return _prior_filter(
+        spark,
+        derived_user_id=derived_user_id,
+        transaction_at=transaction_at,
+        window=timedelta(hours=window_hours),
+        transaction_id=transaction_id,
+        table=table,
+    ).count()
 
 
 def compute_cumulative_spend(
-    session: Session,
+    spark: SparkSession,
     *,
     derived_user_id: str | None,
     transaction_at: datetime,
     window_hours: int,
     transaction_id: int | None = None,
+    table: str | None = None,
 ) -> float:
-    """Sum prior transaction amounts by a user within a rolling hour window.
-
-    Args:
-        session: Active SQLAlchemy ORM session.
-        derived_user_id: Synthetic user identifier; returns ``0.0`` when ``None``.
-        transaction_at: Anchor timestamp for the window.
-        window_hours: Lookback duration in hours.
-        transaction_id: Optional current transaction ID for tie-breaking.
-
-    Returns:
-        Total spend in dollars for qualifying prior transactions.
-    """
+    """Sum prior transaction amounts by a user within a rolling hour window."""
     if derived_user_id is None:
         return 0.0
-
-    stmt = select(
-        func.coalesce(func.sum(Transaction.transaction_amt), 0)
-    ).where(
-        *_prior_transaction_filters(
-            derived_user_id=derived_user_id,
-            transaction_at=transaction_at,
-            window=timedelta(hours=window_hours),
-            transaction_id=transaction_id,
-        )
-    )
-    total = session.scalar(stmt) or 0
-    if isinstance(total, Decimal):
-        return float(total)
+    total = _prior_filter(
+        spark,
+        derived_user_id=derived_user_id,
+        transaction_at=transaction_at,
+        window=timedelta(hours=window_hours),
+        transaction_id=transaction_id,
+        table=table,
+    ).agg(F.coalesce(F.sum("transaction_amt"), F.lit(0.0))).collect()[0][0]
     return float(total)
 
 
 def compute_avg_amount_ratio(
-    session: Session,
+    spark: SparkSession,
     *,
     derived_user_id: str | None,
     transaction_at: datetime,
     transaction_amt: float,
     window_days: int,
     transaction_id: int | None = None,
+    table: str | None = None,
 ) -> float | None:
-    """Compute the ratio of current amount to prior average amount.
-
-    Args:
-        session: Active SQLAlchemy ORM session.
-        derived_user_id: Synthetic user identifier; returns ``None`` when ``None``.
-        transaction_at: Anchor timestamp for the window.
-        transaction_amt: Current transaction amount (numerator).
-        window_days: Lookback duration in days.
-        transaction_id: Optional current transaction ID for tie-breaking.
-
-    Returns:
-        ``transaction_amt / prior_average``, or ``None`` when no prior
-        transactions exist or the prior average is zero.
-    """
+    """Compute the ratio of current amount to prior average amount."""
     if derived_user_id is None:
         return None
-
-    stmt = select(func.avg(Transaction.transaction_amt)).where(
-        *_prior_transaction_filters(
-            derived_user_id=derived_user_id,
-            transaction_at=transaction_at,
-            window=timedelta(days=window_days),
-            transaction_id=transaction_id,
-        )
-    )
-    avg_amount = session.scalar(stmt)
+    avg_amount = _prior_filter(
+        spark,
+        derived_user_id=derived_user_id,
+        transaction_at=transaction_at,
+        window=timedelta(days=window_days),
+        transaction_id=transaction_id,
+        table=table,
+    ).agg(F.avg("transaction_amt")).collect()[0][0]
     if avg_amount is None:
         return None
-
-    avg_value = float(avg_amount) if isinstance(avg_amount, Decimal) else float(avg_amount)
+    avg_value = float(avg_amount)
     if avg_value == 0:
         return None
     return transaction_amt / avg_value
@@ -178,14 +120,7 @@ def compute_avg_amount_ratio(
 
 @dataclass(frozen=True)
 class TransactionFeatures:
-    """Aggregated fraud scoring features for a single transaction.
-
-    Attributes:
-        velocity_1h: Prior transaction count in the last hour.
-        cumulative_spend_24h: Prior total spend in the last 24 hours.
-        avg_amount_ratio_30d: Current amount divided by the prior 30-day average.
-        avg_amount_ratio_90d: Current amount divided by the prior 90-day average.
-    """
+    """Aggregated fraud scoring features for a single transaction."""
 
     velocity_1h: int
     cumulative_spend_24h: float
@@ -265,21 +200,34 @@ def _compute_bulk_user_group(rows: list[_TxnRow]) -> dict[int, TransactionFeatur
     return result
 
 
-def _fetch_all_transaction_rows(session: Session) -> list[_TxnRow]:
-    """Load all transactions in chronological order with a single query."""
-    stmt = select(Transaction).order_by(
-        Transaction.transaction_at,
-        Transaction.transaction_id,
+def _fetch_all_transaction_rows(
+    spark: SparkSession,
+    *,
+    table: str | None = None,
+) -> list[_TxnRow]:
+    """Load all transactions in chronological order."""
+    target = table or transactions_table()
+    rows = (
+        spark.table(target)
+        .orderBy("transaction_at", "transaction_id")
+        .select(
+            "transaction_id",
+            "derived_user_id",
+            "transaction_at",
+            "transaction_amt",
+            "is_fraud",
+        )
+        .collect()
     )
     return [
         _TxnRow(
-            transaction_id=txn.transaction_id,
-            derived_user_id=txn.derived_user_id,
-            transaction_at=txn.transaction_at,
-            transaction_amt=float(txn.transaction_amt),
-            is_fraud=txn.is_fraud,
+            transaction_id=int(row["transaction_id"]),
+            derived_user_id=row["derived_user_id"],
+            transaction_at=row["transaction_at"],
+            transaction_amt=float(row["transaction_amt"]),
+            is_fraud=row["is_fraud"],
         )
-        for txn in session.scalars(stmt)
+        for row in rows
     ]
 
 
@@ -310,36 +258,28 @@ def _features_to_record(row: _TxnRow, features: TransactionFeatures) -> dict[str
 
 
 def compute_transaction_features_dataframe(
-    session: Session,
+    spark: SparkSession | None = None,
     *,
     limit: int | None = 10_000,
+    table: str | None = None,
 ) -> pd.DataFrame:
     """Compute rolling behavioral features for many transactions efficiently.
 
-    Loads all transactions with one query, computes features in memory using
-    per-user sliding windows (linear time), then returns up to ``limit`` rows
-    in chronological order.
-
-    Args:
-        session: Active SQLAlchemy ORM session.
-        limit: Maximum number of rows to return, ordered by ``transaction_at``
-            then ``transaction_id``. ``None`` returns all rows.
-
-    Returns:
-        DataFrame with ``transaction_id``, ``is_fraud``, and feature columns.
+    Loads transactions from Delta, computes features in memory using per-user
+    sliding windows, then returns up to ``limit`` rows in chronological order.
     """
-    rows = _fetch_all_transaction_rows(session)
+    session = spark if spark is not None else get_spark()
+    rows = _fetch_all_transaction_rows(session, table=table)
+    empty_columns = [
+        "transaction_id",
+        "is_fraud",
+        "velocity_1h",
+        "cumulative_spend_24h",
+        "avg_amount_ratio_30d",
+        "avg_amount_ratio_90d",
+    ]
     if not rows:
-        return pd.DataFrame(
-            columns=[
-                "transaction_id",
-                "is_fraud",
-                "velocity_1h",
-                "cumulative_spend_24h",
-                "avg_amount_ratio_30d",
-                "avg_amount_ratio_90d",
-            ]
-        )
+        return pd.DataFrame(columns=empty_columns)
 
     feature_by_id = _compute_features_by_transaction_id(rows)
     export_rows = rows if limit is None else rows[:limit]
@@ -350,80 +290,108 @@ def compute_transaction_features_dataframe(
     return pd.DataFrame.from_records(records)
 
 
+def write_behavioral_features(
+    spark: SparkSession | None = None,
+    *,
+    limit: int | None = 10_000,
+    table: str | None = None,
+    output_table: str | None = None,
+    ensure_tables: bool = True,
+) -> int:
+    """Compute behavioral features and overwrite the Delta output table.
+
+    Returns:
+        Number of rows written.
+    """
+    session = spark if spark is not None else get_spark()
+    if ensure_tables:
+        ensure_bronze_tables(session)
+
+    dataframe = compute_transaction_features_dataframe(
+        session,
+        limit=limit,
+        table=table,
+    )
+    target = output_table or behavioral_features_table()
+    if dataframe.empty:
+        session.createDataFrame([], schema=session.table(target).schema).write.format(
+            "delta"
+        ).mode("overwrite").saveAsTable(target)
+        return 0
+
+    spark_df = session.createDataFrame(dataframe)
+    (
+        spark_df.write.format("delta")
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .saveAsTable(target)
+    )
+    return len(dataframe)
+
+
 def compute_transaction_features(
-    session: Session,
+    spark: SparkSession,
     *,
     derived_user_id: str | None,
     transaction_at: datetime,
     transaction_amt: float,
     transaction_id: int | None = None,
+    table: str | None = None,
 ) -> TransactionFeatures:
-    """Compute all configured fraud scoring features for a transaction.
-
-    Uses fixed windows: 1-hour velocity, 24-hour spend, and 30/90-day
-    amount ratios.
-
-    Args:
-        session: Active SQLAlchemy ORM session.
-        derived_user_id: Synthetic user identifier.
-        transaction_at: Timestamp of the transaction being scored.
-        transaction_amt: Amount of the transaction being scored.
-        transaction_id: Optional current transaction ID for tie-breaking.
-
-    Returns:
-        Populated :class:`TransactionFeatures` instance.
-    """
+    """Compute all configured fraud scoring features for a transaction."""
     return TransactionFeatures(
         velocity_1h=compute_velocity(
-            session,
+            spark,
             derived_user_id=derived_user_id,
             transaction_at=transaction_at,
             window_hours=1,
             transaction_id=transaction_id,
+            table=table,
         ),
         cumulative_spend_24h=compute_cumulative_spend(
-            session,
+            spark,
             derived_user_id=derived_user_id,
             transaction_at=transaction_at,
             window_hours=24,
             transaction_id=transaction_id,
+            table=table,
         ),
         avg_amount_ratio_30d=compute_avg_amount_ratio(
-            session,
+            spark,
             derived_user_id=derived_user_id,
             transaction_at=transaction_at,
             transaction_amt=transaction_amt,
             window_days=30,
             transaction_id=transaction_id,
+            table=table,
         ),
         avg_amount_ratio_90d=compute_avg_amount_ratio(
-            session,
+            spark,
             derived_user_id=derived_user_id,
             transaction_at=transaction_at,
             transaction_amt=transaction_amt,
             window_days=90,
             transaction_id=transaction_id,
+            table=table,
         ),
     )
 
 
-def compute_transaction_features_from_model(
-    session: Session,
-    transaction: Transaction,
+def compute_transaction_features_from_row(
+    spark: SparkSession,
+    *,
+    transaction_id: int,
+    derived_user_id: str | None,
+    transaction_at: datetime,
+    transaction_amt: float,
+    table: str | None = None,
 ) -> TransactionFeatures:
-    """Compute all configured fraud scoring features from an ORM instance.
-
-    Args:
-        session: Active SQLAlchemy ORM session.
-        transaction: Persisted transaction row to score.
-
-    Returns:
-        Populated :class:`TransactionFeatures` instance.
-    """
+    """Compute features from explicit transaction field values."""
     return compute_transaction_features(
-        session,
-        derived_user_id=transaction.derived_user_id,
-        transaction_at=transaction.transaction_at,
-        transaction_amt=float(transaction.transaction_amt),
-        transaction_id=transaction.transaction_id,
+        spark,
+        derived_user_id=derived_user_id,
+        transaction_at=transaction_at,
+        transaction_amt=transaction_amt,
+        transaction_id=transaction_id,
+        table=table,
     )

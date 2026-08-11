@@ -3,87 +3,34 @@
 import pytest
 
 from fraud_scoring_engine.config import (
-    _require,
-    get_database_url,
-    get_postgres_db,
-    get_postgres_host,
-    get_postgres_password,
-    get_postgres_port,
-    get_postgres_user,
+    behavioral_features_table,
+    fraud_alerts_table,
+    get_catalog,
+    get_schema,
+    get_volume_name,
+    table_name,
+    train_features_table,
+    transaction_identities_table,
+    transactions_table,
+    volume_root,
 )
 
 
-def test__require(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TEST_REQUIRED_VAR", "value")
-    assert _require("TEST_REQUIRED_VAR") == "value"
-
-    monkeypatch.delenv("TEST_REQUIRED_VAR", raising=False)
-    with pytest.raises(RuntimeError, match="Missing environment variable: TEST_REQUIRED_VAR"):
-        _require("TEST_REQUIRED_VAR")
-
-    monkeypatch.setenv("TEST_REQUIRED_VAR", "")
-    with pytest.raises(RuntimeError, match="Missing environment variable: TEST_REQUIRED_VAR"):
-        _require("TEST_REQUIRED_VAR")
-
-
-def test_get_postgres_user() -> None:
-    assert get_postgres_user() == "postgres"
+def test_defaults() -> None:
+    assert get_catalog() == "fraud"
+    assert get_schema() == "bronze"
+    assert get_volume_name() == "data"
+    assert volume_root() == "/Volumes/fraud/bronze/data"
+    assert transactions_table() == "fraud.bronze.transactions"
+    assert transaction_identities_table() == "fraud.bronze.transaction_identities"
+    assert train_features_table() == "fraud.bronze.train_features"
+    assert behavioral_features_table() == "fraud.bronze.behavioral_features"
+    assert fraud_alerts_table() == "fraud.bronze.fraud_alerts"
 
 
-def test_get_postgres_user_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("POSTGRES_USER", "appuser")
-    assert get_postgres_user() == "appuser"
-
-
-def test_get_postgres_password(postgres_env: dict[str, str]) -> None:
-    assert get_postgres_password() == postgres_env["POSTGRES_PASSWORD"]
-
-
-def test_get_postgres_password_raises_when_unset() -> None:
-    with pytest.raises(RuntimeError, match="Missing environment variable: POSTGRES_PASSWORD"):
-        get_postgres_password()
-
-
-def test_get_postgres_host() -> None:
-    assert get_postgres_host() == "localhost"
-
-
-def test_get_postgres_host_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("POSTGRES_HOST", "db.example.com")
-    assert get_postgres_host() == "db.example.com"
-
-
-def test_get_postgres_port() -> None:
-    assert get_postgres_port() == "5432"
-
-
-def test_get_postgres_port_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("POSTGRES_PORT", "5433")
-    assert get_postgres_port() == "5433"
-
-
-def test_get_postgres_db() -> None:
-    assert get_postgres_db() == "fraud_db"
-
-
-def test_get_postgres_db_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("POSTGRES_DB", "other_db")
-    assert get_postgres_db() == "other_db"
-
-
-def test_get_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    url = "postgresql+psycopg://user:secret@host:5432/mydb"
-    monkeypatch.setenv("DATABASE_URL", url)
-    assert get_database_url() == url
-
-
-def test_get_database_url_builds_from_parts(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("POSTGRES_USER", "postgres")
-    monkeypatch.setenv("POSTGRES_PASSWORD", "p@ss")
-    monkeypatch.setenv("POSTGRES_HOST", "localhost")
-    monkeypatch.setenv("POSTGRES_PORT", "5432")
-    monkeypatch.setenv("POSTGRES_DB", "fraud_db")
-
-    url = get_database_url()
-
-    assert url.startswith("postgresql+psycopg://postgres:p%40ss@localhost:5432/fraud_db")
+def test_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FRAUD_CATALOG", "acme")
+    monkeypatch.setenv("FRAUD_SCHEMA", "silver")
+    monkeypatch.setenv("FRAUD_VOLUME", "ieee")
+    assert volume_root() == "/Volumes/acme/silver/ieee"
+    assert table_name("transactions") == "acme.silver.transactions"

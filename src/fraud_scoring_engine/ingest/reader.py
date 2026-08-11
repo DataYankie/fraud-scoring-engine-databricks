@@ -1,4 +1,4 @@
-"""Load IEEE-CIS CSV data for database ingestion and Parquet export."""
+"""Load IEEE-CIS CSV data with pandas (tests and small local slices)."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def load_merged_train_data(
     *,
     limit: int | None = None,
 ) -> pd.DataFrame:
-    """Load and left-join train transaction and identity data for Postgres.
+    """Load and left-join train transaction and identity data.
 
     Args:
         transaction_path: Path to ``train_transaction.csv``.
@@ -95,7 +95,7 @@ def load_merged_train_data(
         limit: If set, read only the first ``limit`` transaction rows.
 
     Returns:
-        Merged DataFrame with DB-relevant columns only.
+        Merged DataFrame with operational columns only.
     """
     merged_full = load_merged_train_data_full(
         transaction_path,
@@ -135,7 +135,7 @@ def load_train_feature_matrix(
     *,
     limit: int | None = None,
 ) -> pd.DataFrame:
-    """Load non-Postgres columns into a single feature matrix.
+    """Load non-operational columns into a single feature matrix.
 
     Args:
         transaction_path: Path to ``train_transaction.csv``.
@@ -143,7 +143,7 @@ def load_train_feature_matrix(
         limit: If set, read only the first ``limit`` transaction rows.
 
     Returns:
-        Parquet-ready feature DataFrame keyed by ``TransactionID``.
+        Feature DataFrame keyed by ``TransactionID``.
     """
     merged_full = load_merged_train_data_full(
         transaction_path,

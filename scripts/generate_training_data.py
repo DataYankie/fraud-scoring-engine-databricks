@@ -1,31 +1,32 @@
-"""Generate behavioral training features from PostgreSQL transactions.
+"""Generate behavioral training features from bronze Delta transactions.
 
 Usage:
-    uv run python scripts/generate_training_data.py --limit 10000
-    uv run python scripts/generate_training_data.py --limit 10000 --output data/processed/behavioral_features.parquet
-    uv run python scripts/generate_training_data.py --dry-run
+    python scripts/generate_training_data.py --limit 10000
+    python scripts/generate_training_data.py --limit 10000 --dry-run
 
 Prerequisites:
-    - PostgreSQL running with ingested transactions
-    - POSTGRES_PASSWORD or DATABASE_URL set (see env_local.ps1)
+    - ``fraud.bronze.transactions`` populated (see ingest_ieee_transactions.py)
+    - Cluster with Spark + Delta (Databricks Runtime)
+    - Package installed: %pip install -e .
 """
 
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
-from sqlalchemy.orm import Session
-
-from fraud_scoring_engine.db.engine import create_db_engine
-from fraud_scoring_engine.features import compute_transaction_features_dataframe
-from fraud_scoring_engine.ingest.paths import repo_root
+from fraud_scoring_engine.features import (
+    compute_transaction_features_dataframe,
+    write_behavioral_features,
+)
+from fraud_scoring_engine.config import behavioral_features_table
+from fraud_scoring_engine.spark_session import get_spark
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Compute rolling behavioral features for transactions and export to Parquet."
+            "Compute rolling behavioral features for transactions and write "
+            "fraud.bronze.behavioral_features."
         ),
     )
     parser.add_argument(
@@ -35,43 +36,26 @@ def parse_args() -> argparse.Namespace:
         help="Maximum number of transactions to export (default: 10000).",
     )
     parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help=(
-            "Output Parquet path "
-            "(default: {repo}/data/processed/behavioral_features.parquet)."
-        ),
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Compute features but do not write Parquet output.",
+        help="Compute features but do not write the Delta table.",
     )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    output = (
-        args.output
-        if args.output is not None
-        else repo_root() / "data" / "processed" / "behavioral_features.parquet"
-    )
-
-    engine = create_db_engine()
-    with Session(engine) as session:
-        dataframe = compute_transaction_features_dataframe(session, limit=args.limit)
-
-    print(f"Computed behavioral features for {len(dataframe)} transactions.")
+    spark = get_spark()
+    limit = None if args.limit < 0 else args.limit
 
     if args.dry_run:
-        print("Dry run: skipping Parquet write.")
+        dataframe = compute_transaction_features_dataframe(spark, limit=limit)
+        print(f"Dry run: computed behavioral features for {len(dataframe)} transactions.")
+        print(f"Would write to {behavioral_features_table()}")
         return
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    dataframe.to_parquet(output, index=False)
-    print(f"Wrote {len(dataframe)} rows to {output}")
+    count = write_behavioral_features(spark, limit=limit)
+    print(f"Wrote {count} rows to {behavioral_features_table()}")
 
 
 if __name__ == "__main__":

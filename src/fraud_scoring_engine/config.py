@@ -1,103 +1,55 @@
-"""Application configuration loaded from environment variables."""
+"""Databricks Unity Catalog and Volume configuration."""
+
+from __future__ import annotations
 
 import os
-from urllib.parse import quote_plus
 
 
-def _require(name: str) -> str:
-    """Read a required environment variable.
-
-    Args:
-        name: Environment variable name (e.g. ``POSTGRES_PASSWORD``).
-
-    Returns:
-        The variable's value.
-
-    Raises:
-        RuntimeError: If the variable is missing or empty.
-    """
-    value = os.environ.get(name)
-    if not value:
-        raise RuntimeError(f"Missing environment variable: {name}")
-    return value
+def get_catalog() -> str:
+    """Return the Unity Catalog name (default ``fraud``)."""
+    return os.environ.get("FRAUD_CATALOG", "fraud")
 
 
-def get_postgres_user() -> str:
-    """Return the PostgreSQL username from the environment.
-
-    Reads ``POSTGRES_USER``. Falls back to ``postgres`` if unset.
-
-    Returns:
-        The database user name.
-    """
-    return os.environ.get("POSTGRES_USER", "postgres")
+def get_schema() -> str:
+    """Return the schema name (default ``bronze``)."""
+    return os.environ.get("FRAUD_SCHEMA", "bronze")
 
 
-def get_postgres_password() -> str:
-    """Return the PostgreSQL password from the environment.
-
-    Reads ``POSTGRES_PASSWORD``. This variable is required.
-
-    Returns:
-        The database password.
-
-    Raises:
-        RuntimeError: If ``POSTGRES_PASSWORD`` is missing or empty.
-    """
-    return _require("POSTGRES_PASSWORD")
+def get_volume_name() -> str:
+    """Return the Volume name under the catalog/schema (default ``data``)."""
+    return os.environ.get("FRAUD_VOLUME", "data")
 
 
-def get_postgres_host() -> str:
-    """Return the PostgreSQL host from the environment.
-
-    Reads ``POSTGRES_HOST``. Falls back to ``localhost`` if unset.
-
-    Returns:
-        The database host name or address.
-    """
-    return os.environ.get("POSTGRES_HOST", "localhost")
+def volume_root() -> str:
+    """Return the Volume root path ``/Volumes/{catalog}/{schema}/{volume}``."""
+    return f"/Volumes/{get_catalog()}/{get_schema()}/{get_volume_name()}"
 
 
-def get_postgres_port() -> str:
-    """Return the PostgreSQL port from the environment.
-
-    Reads ``POSTGRES_PORT``. Falls back to ``5432`` if unset.
-
-    Returns:
-        The database port as a string.
-    """
-    return os.environ.get("POSTGRES_PORT", "5432")
+def table_name(table: str) -> str:
+    """Return a fully qualified table name ``{catalog}.{schema}.{table}``."""
+    return f"{get_catalog()}.{get_schema()}.{table}"
 
 
-def get_postgres_db() -> str:
-    """Return the PostgreSQL database name from the environment.
-
-    Reads ``POSTGRES_DB``. Falls back to ``fraud_db`` if unset.
-
-    Returns:
-        The database name.
-    """
-    return os.environ.get("POSTGRES_DB", "fraud_db")
+def transactions_table() -> str:
+    """Return the fully qualified transactions table name."""
+    return table_name("transactions")
 
 
-def get_database_url() -> str:
-    """Return the SQLAlchemy database URL for PostgreSQL.
+def transaction_identities_table() -> str:
+    """Return the fully qualified transaction_identities table name."""
+    return table_name("transaction_identities")
 
-    If ``DATABASE_URL`` is set, it is returned unchanged. Otherwise builds
-    a ``postgresql+psycopg://`` URL from ``POSTGRES_*`` variables via the
-    other getters, with the password URL-encoded via ``quote_plus``.
 
-    Returns:
-        A connection URL suitable for SQLAlchemy/psycopg.
+def train_features_table() -> str:
+    """Return the fully qualified train_features table name."""
+    return table_name("train_features")
 
-    Raises:
-        RuntimeError: If ``DATABASE_URL`` is unset and ``POSTGRES_PASSWORD``
-            is missing (via :func:`get_postgres_password`).
-    """
-    if url := os.environ.get("DATABASE_URL"):
-        return url
-    password = quote_plus(get_postgres_password())
-    return (
-        f"postgresql+psycopg://{get_postgres_user()}:{password}"
-        f"@{get_postgres_host()}:{get_postgres_port()}/{get_postgres_db()}"
-    )
+
+def behavioral_features_table() -> str:
+    """Return the fully qualified behavioral_features table name."""
+    return table_name("behavioral_features")
+
+
+def fraud_alerts_table() -> str:
+    """Return the fully qualified fraud_alerts table name."""
+    return table_name("fraud_alerts")

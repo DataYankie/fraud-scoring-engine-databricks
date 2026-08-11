@@ -1,10 +1,10 @@
-"""Column sets for PostgreSQL ingestion vs Parquet feature export."""
+"""Column sets for Delta table ingestion vs train feature export."""
 
 from __future__ import annotations
 
 import pandas as pd
 
-# CSV columns loaded into PostgreSQL ``transactions`` (+ ``TransactionID`` join key).
+# CSV columns loaded into Delta ``transactions`` (+ ``TransactionID`` join key).
 TRANSACTION_USECOLS = [
     "TransactionID",
     "isFraud",
@@ -25,7 +25,7 @@ TRANSACTION_USECOLS = [
     "dist2",
 ]
 
-# CSV columns loaded into PostgreSQL ``transaction_identities``.
+# CSV columns loaded into Delta ``transaction_identities``.
 IDENTITY_USECOLS = [
     "TransactionID",
     "id_30",
@@ -40,16 +40,19 @@ TRANSACTION_DTYPES: dict[str, str] = {
     "isFraud": "int8",
 }
 
-# Columns stored in Postgres that are excluded from the Parquet feature matrix.
-# ``TransactionID`` is kept in Parquet as the join key to ``transactions.transaction_id``.
-PARQUET_EXCLUDE_COLUMNS = frozenset(
+# Columns stored in operational Delta tables and excluded from train_features.
+# ``TransactionID`` is kept in train_features as the join key.
+FEATURE_EXCLUDE_COLUMNS = frozenset(
     (set(TRANSACTION_USECOLS) - {"TransactionID"})
     | {col for col in IDENTITY_USECOLS if col != "TransactionID"}
 )
 
+# Backwards-compatible alias.
+PARQUET_EXCLUDE_COLUMNS = FEATURE_EXCLUDE_COLUMNS
+
 
 def database_columns(merged: pd.DataFrame) -> list[str]:
-    """Return ordered CSV columns required for ORM ingestion."""
+    """Return ordered CSV columns required for operational table ingestion."""
     columns: list[str] = []
     for name in TRANSACTION_USECOLS:
         if name in merged.columns:
@@ -60,8 +63,8 @@ def database_columns(merged: pd.DataFrame) -> list[str]:
     return columns
 
 
-def split_parquet_features(merged: pd.DataFrame) -> pd.DataFrame:
-    """Return columns not stored in Postgres (plus ``TransactionID`` join key).
+def split_train_features(merged: pd.DataFrame) -> pd.DataFrame:
+    """Return columns not stored in operational tables (plus ``TransactionID``).
 
     Args:
         merged: Full train transaction + identity DataFrame.
@@ -69,9 +72,14 @@ def split_parquet_features(merged: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Feature matrix for ML training with one row per transaction.
     """
-    drop_cols = [col for col in PARQUET_EXCLUDE_COLUMNS if col in merged.columns]
+    drop_cols = [col for col in FEATURE_EXCLUDE_COLUMNS if col in merged.columns]
     features = merged.drop(columns=drop_cols).copy()
     if "TransactionID" not in features.columns:
-        msg = "Parquet feature frame must include TransactionID as join key"
+        msg = "Train feature frame must include TransactionID as join key"
         raise ValueError(msg)
     return features
+
+
+def split_parquet_features(merged: pd.DataFrame) -> pd.DataFrame:
+    """Alias for :func:`split_train_features`."""
+    return split_train_features(merged)

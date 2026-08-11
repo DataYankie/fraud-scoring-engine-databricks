@@ -1,16 +1,24 @@
-"""Download IEEE-CIS Fraud Detection competition data into data/raw/.
+"""Download IEEE-CIS Fraud Detection competition data into the Volume raw dir.
 
 Usage:
-    uv run python scripts/download_ieee_fraud_data.py
+    python scripts/download_ieee_fraud_data.py
 
 Requires Kaggle credentials via KAGGLE_API_TOKEN or ~/.kaggle/access_token.
 You must join and accept the competition rules at:
 https://www.kaggle.com/competitions/ieee-fraud-detection
+
+Default output: /Volumes/fraud/bronze/data/raw/
+Override with FRAUD_CATALOG / FRAUD_SCHEMA / FRAUD_VOLUME or --data-dir.
 """
 
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 
 import kagglehub
+
+from fraud_scoring_engine.ingest.paths import ieee_data_paths
 
 COMPETITION = "ieee-fraud-detection"
 EXPECTED_FILES = (
@@ -22,9 +30,22 @@ EXPECTED_FILES = (
 )
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Download IEEE-CIS competition CSVs into the Volume raw directory.",
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=None,
+        help="Output directory (default: /Volumes/fraud/bronze/data/raw).",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    data_dir = repo_root / "data" / "raw"
+    args = parse_args()
+    data_dir = ieee_data_paths(args.data_dir).data_dir
     data_dir.mkdir(parents=True, exist_ok=True)
 
     path = kagglehub.competition_download(

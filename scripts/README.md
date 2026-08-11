@@ -1,62 +1,74 @@
 # Scripts
 
-Operational commands for the fraud-scoring-engine data pipeline.
+Operational commands for the fraud-scoring-engine bronze pipeline on Databricks.
 
 ## Prerequisites
-- uv installed
-- Docker (PostgreSQL via docker-compose)
-- `. env_local.ps1` or equivalent POSTGRES_* vars
+- Databricks cluster (Spark + Delta)
+- Package installed: `%pip install -e /Workspace/Repos/<path-to-this-repo>`
+- Unity Catalog Volume at `/Volumes/fraud/bronze/data` (or override via `FRAUD_*` env vars)
+- Kaggle credentials for the download step
 
 ## Workflow
 
-1. Download IEEE data
-2. Apply migrations
+1. Download IEEE data to the Volume
+2. Ensure bronze Delta tables
 3. Ingest (dev → full)
+4. Generate behavioral features
 
 ### 1. Download data
 ```bash
-uv run python scripts/download_ieee_fraud_data.py
+python scripts/download_ieee_fraud_data.py
 ```
 
-### 2. Apply schema
-```bash
-alembic upgrade head
+Writes to `/Volumes/fraud/bronze/data/raw/` by default. Override with `--data-dir`.
+
+### 2. Ensure schema / tables
+```python
+from fraud_scoring_engine.spark_session import get_spark
+from fraud_scoring_engine.delta import ensure_bronze_tables
+
+ensure_bronze_tables(get_spark())
 ```
+
+Ingest also calls `ensure_bronze_tables` unless disabled.
 
 ### 3. Ingest transactions
-Operational columns go to PostgreSQL. All other CSV columns are written to a single Parquet file at `data/processed/train_features.parquet` (same `--limit` slice).
+Operational columns MERGE into Delta. Remaining CSV columns overwrite `fraud.bronze.train_features`.
 
 #### Dev pass (10k rows)
 ```bash
-uv run python scripts/ingest_ieee_transactions.py --limit 10000
+python scripts/ingest_ieee_transactions.py --limit 10000
 ```
 
 #### Dry run
 ```bash
-uv run python scripts/ingest_ieee_transactions.py --limit 100 --dry-run
+python scripts/ingest_ieee_transactions.py --limit 100 --dry-run
 ```
 
-#### Parquet only (no Postgres)
+#### Features only
 ```bash
-uv run python scripts/ingest_ieee_transactions.py --skip-db --limit 10000
+python scripts/ingest_ieee_transactions.py --skip-tables --limit 10000
+```
+
+#### Tables only
+```bash
+python scripts/ingest_ieee_transactions.py --skip-features
 ```
 
 #### Full train load
 ```bash
-uv run python scripts/ingest_ieee_transactions.py
+python scripts/ingest_ieee_transactions.py
 ```
 
 ### 4. Generate behavioral training features
-Computes rolling velocity, spend, and amount-ratio features from PostgreSQL (one query + in-memory pass).
+Computes rolling velocity, spend, and amount-ratio features from `fraud.bronze.transactions` and overwrites `fraud.bronze.behavioral_features`.
 
 ```bash
-uv run python scripts/generate_training_data.py --limit 10000
+python scripts/generate_training_data.py --limit 10000
 ```
 
 #### Training features in Python
 ```python
-import pandas as pd
-
-features = pd.read_parquet("data/processed/train_features.parquet")
-# Join to Postgres on features["TransactionID"] == transactions.transaction_id
+features = spark.table("fraud.bronze.train_features")
+# Join to transactions on features.TransactionID == transactions.transaction_id
 ```

@@ -3,12 +3,12 @@
 import pandas as pd
 
 from fraud_scoring_engine.ingest.columns import (
-    PARQUET_EXCLUDE_COLUMNS,
-    split_parquet_features,
+    FEATURE_EXCLUDE_COLUMNS,
+    split_train_features,
 )
 
 
-def test_split_parquet_features_excludes_postgres_columns() -> None:
+def test_split_train_features_excludes_operational_columns() -> None:
     merged = pd.DataFrame(
         {
             "TransactionID": [1, 2],
@@ -29,17 +29,17 @@ def test_split_parquet_features_excludes_postgres_columns() -> None:
         }
     )
 
-    features = split_parquet_features(merged)
+    features = split_train_features(merged)
 
     assert "TransactionID" in features.columns
     assert "V1" in features.columns
     assert "C1" in features.columns
     assert "id_01" in features.columns
-    for excluded in PARQUET_EXCLUDE_COLUMNS:
+    for excluded in FEATURE_EXCLUDE_COLUMNS:
         assert excluded not in features.columns
 
 
-def test_split_parquet_features_preserves_row_count() -> None:
+def test_split_train_features_preserves_row_count() -> None:
     merged = pd.DataFrame(
         {
             "TransactionID": [1, 2, 3],
@@ -49,6 +49,6 @@ def test_split_parquet_features_preserves_row_count() -> None:
             "V1": [0.1, 0.2, 0.3],
         }
     )
-    features = split_parquet_features(merged)
+    features = split_train_features(merged)
     assert len(features) == 3
     assert list(features["TransactionID"]) == [1, 2, 3]
