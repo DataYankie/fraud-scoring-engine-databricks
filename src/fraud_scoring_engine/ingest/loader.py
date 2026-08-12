@@ -136,7 +136,6 @@ def ingest_train_transactions(
     *,
     spark: SparkSession | None = None,
     data_dir: Path | None = None,
-    processed_dir: Path | None = None,
     limit: int | None = None,
     dry_run: bool = False,
     skip_tables: bool = False,
@@ -151,8 +150,6 @@ def ingest_train_transactions(
     Args:
         spark: Optional SparkSession; defaults to :func:`get_spark`.
         data_dir: Optional override for Volume ``raw/``.
-        processed_dir: Optional override for Volume ``processed/`` (unused for
-            Delta feature writes; retained for CLI compatibility).
         limit: If set, process only the first ``limit`` transaction rows.
         dry_run: If True, report counts only; do not write Delta tables.
         skip_tables: If True, write train_features only.
@@ -162,8 +159,6 @@ def ingest_train_transactions(
     Returns:
         Summary counts for the ingest run.
     """
-    del processed_dir  # Volume processed path reserved; features go to Delta.
-
     if skip_tables and skip_features:
         msg = "At least one of Delta table ingest or train_features write must be enabled"
         raise ValueError(msg)

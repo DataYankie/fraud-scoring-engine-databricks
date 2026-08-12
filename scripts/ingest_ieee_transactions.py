@@ -45,12 +45,6 @@ def parse_args() -> argparse.Namespace:
         help="Path to raw CSVs (default: /Volumes/fraud/bronze/data/raw).",
     )
     parser.add_argument(
-        "--processed-dir",
-        type=Path,
-        default=None,
-        help="Unused for Delta feature writes; retained for CLI compatibility.",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Read and transform only; do not write Delta tables.",
@@ -72,7 +66,6 @@ def main() -> None:
     args = parse_args()
     ingest_train_transactions(
         data_dir=args.data_dir,
-        processed_dir=args.processed_dir,
         limit=args.limit,
         dry_run=args.dry_run,
         skip_tables=args.skip_tables,

@@ -34,33 +34,12 @@ IDENTITY_USECOLS = [
     "DeviceInfo",
 ]
 
-TRANSACTION_DTYPES: dict[str, str] = {
-    "TransactionID": "int32",
-    "TransactionDT": "int32",
-    "isFraud": "int8",
-}
-
 # Columns stored in operational Delta tables and excluded from train_features.
 # ``TransactionID`` is kept in train_features as the join key.
 FEATURE_EXCLUDE_COLUMNS = frozenset(
     (set(TRANSACTION_USECOLS) - {"TransactionID"})
     | {col for col in IDENTITY_USECOLS if col != "TransactionID"}
 )
-
-# Backwards-compatible alias.
-PARQUET_EXCLUDE_COLUMNS = FEATURE_EXCLUDE_COLUMNS
-
-
-def database_columns(merged: pd.DataFrame) -> list[str]:
-    """Return ordered CSV columns required for operational table ingestion."""
-    columns: list[str] = []
-    for name in TRANSACTION_USECOLS:
-        if name in merged.columns:
-            columns.append(name)
-    for name in IDENTITY_USECOLS:
-        if name != "TransactionID" and name in merged.columns:
-            columns.append(name)
-    return columns
 
 
 def split_train_features(merged: pd.DataFrame) -> pd.DataFrame:
@@ -78,8 +57,3 @@ def split_train_features(merged: pd.DataFrame) -> pd.DataFrame:
         msg = "Train feature frame must include TransactionID as join key"
         raise ValueError(msg)
     return features
-
-
-def split_parquet_features(merged: pd.DataFrame) -> pd.DataFrame:
-    """Alias for :func:`split_train_features`."""
-    return split_train_features(merged)
