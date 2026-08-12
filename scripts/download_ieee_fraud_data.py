@@ -13,11 +13,27 @@ Override with FRAUD_CATALOG / FRAUD_SCHEMA / FRAUD_VOLUME or --data-dir.
 
 from __future__ import annotations
 
-import argparse
+import subprocess
+import sys
+
+# Install kagglehub for this script execution
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", "-q", "kagglehub"
+])
+
+# Install fraud_scoring_engine package for this script execution
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", "-q",
+    "/Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine"
+])
+
 from pathlib import Path
+import argparse
+import os
+import json
+from databricks.sdk.runtime import dbutils
 
 import kagglehub
-
 from fraud_scoring_engine.ingest.paths import ieee_data_paths
 
 COMPETITION = "ieee-fraud-detection"
@@ -40,7 +56,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Output directory (default: /Volumes/fraud/bronze/data/raw).",
     )
-    return parser.parse_args()
+    return parser.parse_known_args()[0]
 
 
 def main() -> None:
