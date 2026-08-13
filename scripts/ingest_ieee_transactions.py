@@ -19,9 +19,16 @@ Prerequisites:
 
 from __future__ import annotations
 
+import subprocess
+import sys
 import argparse
 from pathlib import Path
 
+# Install fraud_scoring_engine package for this script execution
+subprocess.check_call([
+    sys.executable, "-m", "pip", "install", "-q",
+    "/Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine"
+])
 from fraud_scoring_engine.ingest.loader import ingest_train_transactions
 
 
