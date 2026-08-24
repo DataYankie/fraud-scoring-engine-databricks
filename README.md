@@ -8,7 +8,7 @@ End-to-end system for scoring payment transactions for fraud risk, built around 
 - [x] Bronze Delta tables (transactions, identities, train_features)
 - [x] Feature scaffolding + tests/CI
 - [x] EDA
-- [ ] XGBoost notebook
+- [x] XGBoost notebook (preprocess + time split + Optuna + MLflow)
 - [ ] Training pipeline
 - [ ] Scoring API
 - [ ] Evaluation / monitoring

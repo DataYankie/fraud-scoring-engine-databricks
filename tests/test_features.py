@@ -388,3 +388,15 @@ def test_compute_transaction_features_dataframe_respects_limit(seeded_spark) -> 
 
     assert len(dataframe) == 2
     assert list(dataframe["transaction_id"]) == [1, 2]
+
+
+@pytest.mark.spark
+def test_compute_transaction_features_dataframe_preserves_transaction_id_order(
+    seeded_spark,
+) -> None:
+    dataframe = compute_transaction_features_dataframe(
+        seeded_spark,
+        transaction_ids=[4, 1, 2],
+    )
+
+    assert list(dataframe["transaction_id"]) == [4, 1, 2]
