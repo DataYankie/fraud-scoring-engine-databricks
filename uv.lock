@@ -773,15 +773,15 @@ wheels = [
 
 [[package]]
 name = "delta-spark"
-version = "3.3.2"
+version = "3.3.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "importlib-metadata" },
     { name = "pyspark" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/c9/a4d34fee1dafcad33d4e810ff2ce14a9f6e8e7af9797a9de79ebc3334987/delta_spark-3.3.2.tar.gz", hash = "sha256:f3e89ec4a15a541988f9d6496016a67cf619475e8eeca71da5e073f6ba0da845", size = 23066, upload-time = "2025-05-29T22:25:49.412Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/57/70d23ed0971ad52d64d90b619de03b0a6387ca43ffbde472917078044a60/delta_spark-3.3.3.tar.gz", hash = "sha256:bd2cb2912066f5f59029f3cbd02841dd6bfbd3c350aa2033583f7de1627e83e2", size = 23045, upload-time = "2026-08-12T06:38:11.044Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4b/b7/f484bca84628f9f7a9a16ecfd8b010edbda9fa3f5e3918e967ddd69bf6af/delta_spark-3.3.2-py3-none-any.whl", hash = "sha256:0a34c720b4368f1655e2348e380b5b3baaca0f2b3d519a3198208f00f65e4062", size = 22024, upload-time = "2025-05-29T22:25:48.008Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/3e/943b539ab84299eb182d022ce4ab78b11052ec80c4d4507063e726c5752e/delta_spark-3.3.3-py3-none-any.whl", hash = "sha256:f44ee1f46e16003276e54743aa9e3f19b7375dd3be9d126be0793485c29b1cee", size = 22022, upload-time = "2026-08-12T06:38:09.928Z" },
 ]
 
 [[package]]
@@ -961,7 +961,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "delta-spark", specifier = ">=3.2.0,<4.0.0" },
+    { name = "delta-spark", specifier = ">=3.3.3,<4.0.0" },
     { name = "ipykernel", specifier = ">=7.2.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "matplotlib", specifier = ">=3.10.0" },
