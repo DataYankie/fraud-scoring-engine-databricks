@@ -110,6 +110,13 @@ def bronze_tables(spark, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     from fraud_scoring_engine.delta.schema import ensure_bronze_tables
     from fraud_scoring_engine.config import get_catalog, get_schema
 
+    cleanup_catalog = get_catalog()
+    cleanup_schema = get_schema()
+    try:
+        spark.sql(f"DROP SCHEMA IF EXISTS {cleanup_catalog}.{cleanup_schema} CASCADE")
+    except Exception:
+        pass
+
     ensure_bronze_tables(spark)
     yield spark
     
