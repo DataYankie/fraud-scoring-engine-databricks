@@ -7,6 +7,7 @@ from datetime import datetime
 import pandas as pd
 import pytest
 
+from spark_helpers import write_delta_table
 from fraud_scoring_engine.config import (
     train_features_table,
     transaction_identities_table,
@@ -48,20 +49,10 @@ def _txn_row(transaction_id: int, **overrides: object) -> dict[str, object]:
     return row
 
 
-def _write_table(spark, table: str, rows: list[dict]) -> None:
-    df = spark.createDataFrame(pd.DataFrame(rows))
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(table)
-    )
-
-
 @pytest.fixture
 def seeded_spark(bronze_tables):
     spark = bronze_tables
-    _write_table(
+    write_delta_table(
         spark,
         transactions_table(),
         [
@@ -79,7 +70,7 @@ def seeded_spark(bronze_tables):
             ),
         ],
     )
-    _write_table(
+    write_delta_table(
         spark,
         transaction_identities_table(),
         [
@@ -92,7 +83,7 @@ def seeded_spark(bronze_tables):
             }
         ],
     )
-    _write_table(
+    write_delta_table(
         spark,
         train_features_table(),
         [
@@ -172,7 +163,7 @@ def test_build_training_frame_raises_when_train_features_is_empty(bronze_tables)
 def test_build_training_frame_raises_when_transactions_have_no_matching_ids(
     seeded_spark,
 ) -> None:
-    _write_table(
+    write_delta_table(
         seeded_spark,
         train_features_table(),
         [{"TransactionID": 999, "C1": 1.0}],

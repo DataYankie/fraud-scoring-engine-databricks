@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import pytest
 
+from spark_helpers import write_delta_table
 from fraud_scoring_engine.config import transactions_table
 from fraud_scoring_engine.features import (
     compute_avg_amount_ratio,
@@ -23,13 +24,7 @@ BASE_TIME = datetime(2017, 12, 1, 12, 0, 0)
 
 
 def _seed_transactions(spark, rows: list[dict]) -> None:
-    df = spark.createDataFrame(pd.DataFrame(rows))
-    (
-        df.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(transactions_table())
-    )
+    write_delta_table(spark, transactions_table(), rows)
 
 
 @pytest.fixture
