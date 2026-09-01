@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS {table} (
 ) USING DELTA
 """
 
-# Wide IEEE feature matrix schema is set on first overwrite ingest.
+# Wide IEEE feature matrix schema is set on first append/merge ingest (mergeSchema).
 TRAIN_FEATURES_DDL = """
 CREATE TABLE IF NOT EXISTS {table} (
   TransactionID BIGINT

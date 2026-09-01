@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import DataFrame, SparkSession # type: ignore
 
 from fraud_scoring_engine.config import (
     train_features_table,
@@ -121,15 +121,38 @@ def _merge_delta(
     return count
 
 
-def _overwrite_features(spark: SparkSession, features: DataFrame, table: str) -> int:
-    count = features.count()
-    (
-        features.write.format("delta")
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .saveAsTable(table)
+def _merge_features(spark: SparkSession, features: DataFrame, table: str) -> int:
+    """MERGE ``features`` into ``table`` on ``TransactionID``; return source row count."""
+    columns = tuple(features.columns)
+    return _merge_delta(
+        spark,
+        features,
+        target_table=table,
+        key="TransactionID",
+        columns=columns,
     )
-    return count
+
+
+def _write_features(spark: SparkSession, features: DataFrame, table: str) -> int:
+    """Upsert IEEE feature rows into ``table``.
+
+    Appends with ``mergeSchema`` when the target table is empty; otherwise
+    MERGEs on ``TransactionID``. Returns the source row count.
+    """
+    count = features.count()
+    if count == 0:
+        return 0
+
+    if spark.table(table).count() == 0:
+        (
+            features.write.format("delta")
+            .mode("append")
+            .option("mergeSchema", "true")
+            .saveAsTable(table)
+        )
+        return count
+
+    return _merge_features(spark, features, table)
 
 
 def ingest_train_transactions(
@@ -145,7 +168,7 @@ def ingest_train_transactions(
     """Load train IEEE data from Volume CSVs into bronze Delta tables.
 
     Operational columns are MERGEd into ``transactions`` / ``transaction_identities``.
-    Remaining CSV columns (plus ``TransactionID``) overwrite ``train_features``.
+    Remaining CSV columns (plus ``TransactionID``) are MERGEd into ``train_features``.
 
     Args:
         spark: Optional SparkSession; defaults to :func:`get_spark`.
@@ -187,7 +210,7 @@ def ingest_train_transactions(
         feature_rows = features.count()
         features_table_name = train_features_table()
         if not dry_run:
-            _overwrite_features(session, features, features_table_name)
+            _write_features(session, features, features_table_name)
 
     if dry_run:
         identity_count = count_identity_rows_spark(merged)
