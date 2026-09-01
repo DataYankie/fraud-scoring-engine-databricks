@@ -118,7 +118,7 @@ def split_train_features_spark(merged: DataFrame) -> DataFrame:
     if "TransactionID" not in features.columns:
         msg = "Train feature frame must include TransactionID as join key"
         raise ValueError(msg)
-    return features
+    return features.withColumn("TransactionID", F.col("TransactionID").cast("long"))
 
 
 def count_identity_rows_spark(merged: DataFrame) -> int:
