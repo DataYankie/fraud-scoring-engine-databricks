@@ -19,6 +19,8 @@ from fraud_scoring_engine.config import (
     volume_root,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_defaults() -> None:
     assert get_catalog() == "fraud"

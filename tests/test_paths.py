@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
+import pytest
+
 from fraud_scoring_engine.ingest.paths import ieee_data_paths, repo_root
+
+pytestmark = pytest.mark.unit
 
 
 def test_ieee_data_paths_defaults_to_volume() -> None:
