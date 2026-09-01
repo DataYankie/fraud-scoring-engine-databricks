@@ -1,8 +1,9 @@
-"""Databricks Unity Catalog and Volume configuration."""
+"""Databricks Unity Catalog, Volume, and MLflow configuration."""
 
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 def get_catalog() -> str:
@@ -53,3 +54,25 @@ def behavioral_features_table() -> str:
 def fraud_alerts_table() -> str:
     """Return the fully qualified fraud_alerts table name."""
     return table_name("fraud_alerts")
+
+
+def get_mlflow_tracking_uri() -> str:
+    """Return the MLflow tracking URI.
+
+    Reads ``MLFLOW_TRACKING_URI``. Defaults to ``databricks`` so workspace
+    experiments work without extra configuration.
+    """
+    return os.environ.get("MLFLOW_TRACKING_URI", "databricks")
+
+
+def get_mlflow_artifact_root() -> Path:
+    """Return the directory used for MLflow artifact storage.
+
+    Reads ``MLFLOW_ARTIFACT_ROOT``. On Databricks Runtime, defaults to
+    ``{volume_root}/mlartifacts``. Otherwise defaults to ``{repo_root}/mlartifacts``.
+    """
+    if path := os.environ.get("MLFLOW_ARTIFACT_ROOT"):
+        return Path(path)
+    if os.environ.get("DATABRICKS_RUNTIME_VERSION"):
+        return Path(volume_root()) / "mlartifacts"
+    return Path(__file__).resolve().parents[2] / "mlartifacts"

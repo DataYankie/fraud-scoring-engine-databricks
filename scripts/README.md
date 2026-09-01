@@ -14,6 +14,7 @@ Operational commands for the fraud-scoring-engine bronze pipeline on Databricks.
 2. Ensure bronze Delta tables
 3. Ingest (dev → full)
 4. Generate behavioral features
+5. Train XGBoost (notebook)
 
 ### 1. Download data
 ```bash
@@ -67,8 +68,14 @@ Computes rolling velocity, spend, and amount-ratio features from `fraud.bronze.t
 python scripts/generate_training_data.py --limit 10000
 ```
 
+### 5. Train XGBoost (notebook)
+Open `notebooks/xgboost.ipynb` on a Databricks cluster. It builds a training frame from bronze Delta tables, time-splits, preprocesses features, and logs baseline + Optuna runs to workspace MLflow.
+
+Override tracking/artifacts with `MLFLOW_TRACKING_URI` and `MLFLOW_ARTIFACT_ROOT` if needed. On Databricks Runtime, artifacts default to `/Volumes/fraud/bronze/data/mlartifacts`.
+
 #### Training features in Python
 ```python
-features = spark.table("fraud.bronze.train_features")
-# Join to transactions on features.TransactionID == transactions.transaction_id
+from fraud_scoring_engine.training import build_training_frame
+
+df = build_training_frame(spark, limit=10_000)
 ```

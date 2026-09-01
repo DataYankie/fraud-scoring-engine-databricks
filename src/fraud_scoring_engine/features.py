@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 
@@ -139,12 +140,21 @@ class _TxnRow:
     is_fraud: int | None
 
 
+BEHAVIORAL_FEATURE_COLUMNS: tuple[str, ...] = (
+    "velocity_1h",
+    "cumulative_spend_24h",
+    "avg_amount_ratio_30d",
+    "avg_amount_ratio_90d",
+)
+
 _NULL_FEATURES = TransactionFeatures(
     velocity_1h=0,
     cumulative_spend_24h=0.0,
     avg_amount_ratio_30d=None,
     avg_amount_ratio_90d=None,
 )
+
+DEFAULT_BEHAVIORAL_FEATURES = _NULL_FEATURES
 
 
 def _compute_bulk_user_group(rows: list[_TxnRow]) -> dict[int, TransactionFeatures]:
@@ -262,11 +272,13 @@ def compute_transaction_features_dataframe(
     *,
     limit: int | None = 10_000,
     table: str | None = None,
+    transaction_ids: Iterable[int] | None = None,
 ) -> pd.DataFrame:
     """Compute rolling behavioral features for many transactions efficiently.
 
     Loads transactions from Delta, computes features in memory using per-user
-    sliding windows, then returns up to ``limit`` rows in chronological order.
+    sliding windows, then returns rows filtered by ``transaction_ids`` or
+    truncated to ``limit`` in chronological order.
     """
     session = spark if spark is not None else get_spark()
     rows = _fetch_all_transaction_rows(session, table=table)
@@ -282,7 +294,17 @@ def compute_transaction_features_dataframe(
         return pd.DataFrame(columns=empty_columns)
 
     feature_by_id = _compute_features_by_transaction_id(rows)
-    export_rows = rows if limit is None else rows[:limit]
+    if transaction_ids is not None:
+        row_by_id = {row.transaction_id: row for row in rows}
+        export_rows = [
+            row_by_id[int(transaction_id)]
+            for transaction_id in transaction_ids
+            if int(transaction_id) in row_by_id
+        ]
+    elif limit is None:
+        export_rows = rows
+    else:
+        export_rows = rows[:limit]
     records = [
         _features_to_record(row, feature_by_id[row.transaction_id])
         for row in export_rows

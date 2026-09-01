@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pyspark.sql import SparkSession
+from pyspark.sql import SparkSession # type: ignore
 
 from fraud_scoring_engine.config import (
     behavioral_features_table,
