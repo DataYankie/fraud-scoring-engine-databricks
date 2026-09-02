@@ -22,6 +22,8 @@ USER_A = "a" * 32
 USER_B = "b" * 32
 BASE_TIME = datetime(2017, 12, 1, 12, 0, 0)
 
+pytestmark = [pytest.mark.integration, pytest.mark.spark]
+
 
 def _seed_transactions(spark, rows: list[dict]) -> None:
     write_delta_table(spark, transactions_table(), rows)
@@ -142,7 +144,6 @@ def seeded_spark(bronze_tables):
     return spark
 
 
-@pytest.mark.spark
 def test_first_transaction_has_zero_velocity_and_spend(bronze_tables) -> None:
     spark = bronze_tables
     _seed_transactions(
@@ -205,7 +206,6 @@ def test_first_transaction_has_zero_velocity_and_spend(bronze_tables) -> None:
     )
 
 
-@pytest.mark.spark
 def test_velocity_counts_prior_transactions_in_last_hour(seeded_spark) -> None:
     assert (
         compute_velocity(
@@ -219,7 +219,6 @@ def test_velocity_counts_prior_transactions_in_last_hour(seeded_spark) -> None:
     )
 
 
-@pytest.mark.spark
 def test_cumulative_spend_sums_prior_24h_only(seeded_spark) -> None:
     assert (
         compute_cumulative_spend(
@@ -233,7 +232,6 @@ def test_cumulative_spend_sums_prior_24h_only(seeded_spark) -> None:
     )
 
 
-@pytest.mark.spark
 def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_spark) -> None:
     ratio_30d = compute_avg_amount_ratio(
         seeded_spark,
@@ -256,7 +254,6 @@ def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_spark) -> None:
     assert ratio_90d == pytest.approx(2000.0 / 20.0)
 
 
-@pytest.mark.spark
 def test_null_derived_user_id_returns_safe_defaults(bronze_tables) -> None:
     spark = bronze_tables
     assert (
@@ -292,7 +289,6 @@ def test_null_derived_user_id_returns_safe_defaults(bronze_tables) -> None:
     )
 
 
-@pytest.mark.spark
 def test_same_timestamp_excludes_current_transaction_id(seeded_spark) -> None:
     assert (
         compute_velocity(
@@ -316,7 +312,6 @@ def test_same_timestamp_excludes_current_transaction_id(seeded_spark) -> None:
     )
 
 
-@pytest.mark.spark
 def test_compute_transaction_features_aggregator(seeded_spark) -> None:
     features = compute_transaction_features(
         seeded_spark,
@@ -332,7 +327,6 @@ def test_compute_transaction_features_aggregator(seeded_spark) -> None:
     assert features.avg_amount_ratio_90d == pytest.approx(2000.0 / 20.0)
 
 
-@pytest.mark.spark
 def test_compute_transaction_features_from_row(seeded_spark) -> None:
     features = compute_transaction_features_from_row(
         seeded_spark,
@@ -346,7 +340,6 @@ def test_compute_transaction_features_from_row(seeded_spark) -> None:
     assert features.cumulative_spend_24h == 50.0
 
 
-@pytest.mark.spark
 def test_compute_transaction_features_dataframe_matches_row_by_row(seeded_spark) -> None:
     dataframe = compute_transaction_features_dataframe(seeded_spark, limit=None)
 
@@ -377,7 +370,6 @@ def test_compute_transaction_features_dataframe_matches_row_by_row(seeded_spark)
             assert row["avg_amount_ratio_90d"] == pytest.approx(expected.avg_amount_ratio_90d)
 
 
-@pytest.mark.spark
 def test_compute_transaction_features_dataframe_respects_limit(seeded_spark) -> None:
     dataframe = compute_transaction_features_dataframe(seeded_spark, limit=2)
 
@@ -385,7 +377,6 @@ def test_compute_transaction_features_dataframe_respects_limit(seeded_spark) -> 
     assert list(dataframe["transaction_id"]) == [1, 2]
 
 
-@pytest.mark.spark
 def test_compute_transaction_features_dataframe_preserves_transaction_id_order(
     seeded_spark,
 ) -> None:

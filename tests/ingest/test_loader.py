@@ -15,6 +15,8 @@ from fraud_scoring_engine.config import (
 from fraud_scoring_engine.ingest.loader import ingest_train_transactions
 from fraud_scoring_engine.ingest.transforms import generate_user_id_from_components
 
+pytestmark = [pytest.mark.integration, pytest.mark.spark]
+
 
 def _write_sample_csvs(raw_dir: Path) -> None:
     raw_dir.mkdir(parents=True, exist_ok=True)
@@ -109,7 +111,6 @@ def _write_extra_transaction_csv(raw_dir: Path) -> None:
     identities.to_csv(raw_dir / "train_identity.csv", index=False)
 
 
-@pytest.mark.spark
 def test_ingest_merges_transactions_identities_and_features(
     bronze_tables,
     tmp_path: Path,
@@ -159,7 +160,6 @@ def test_ingest_merges_transactions_identities_and_features(
     assert features.count() == 2
 
 
-@pytest.mark.spark
 def test_ingest_merge_is_idempotent(bronze_tables, tmp_path: Path) -> None:
     spark = bronze_tables
     raw = tmp_path / "raw"
@@ -173,7 +173,6 @@ def test_ingest_merge_is_idempotent(bronze_tables, tmp_path: Path) -> None:
     assert spark.table(train_features_table()).count() == 2
 
 
-@pytest.mark.spark
 def test_ingest_features_merge_appends_new_transactions(
     bronze_tables,
     tmp_path: Path,
@@ -196,7 +195,6 @@ def test_ingest_features_merge_appends_new_transactions(
     assert features.select("TransactionID").distinct().count() == 3
 
 
-@pytest.mark.spark
 def test_ingest_features_merge_updates_existing_records(
     bronze_tables,
     tmp_path: Path,
@@ -247,7 +245,6 @@ def test_ingest_features_merge_updates_existing_records(
     assert row["V1"] == 0.999
 
 
-@pytest.mark.spark
 def test_ingest_dry_run_writes_nothing(bronze_tables, tmp_path: Path) -> None:
     spark = bronze_tables
     raw = tmp_path / "raw"

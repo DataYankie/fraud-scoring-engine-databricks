@@ -20,6 +20,8 @@ from fraud_scoring_engine.training.dataset import (
     load_transaction_model_columns,
 )
 
+pytestmark = [pytest.mark.integration, pytest.mark.spark]
+
 BASE_TIME = datetime(2017, 12, 1, 12, 0, 0)
 
 
@@ -94,7 +96,6 @@ def seeded_spark(bronze_tables):
     return spark
 
 
-@pytest.mark.spark
 def test_load_transaction_model_columns_returns_delta_features(seeded_spark) -> None:
     dataframe = load_transaction_model_columns(
         seeded_spark,
@@ -109,7 +110,6 @@ def test_load_transaction_model_columns_returns_delta_features(seeded_spark) -> 
     assert pd.isna(dataframe.loc[dataframe["transaction_id"] == 102, "id_30"].iloc[0])
 
 
-@pytest.mark.spark
 def test_load_static_features_filters_by_transaction_ids(seeded_spark) -> None:
     loaded = load_static_features(seeded_spark, transaction_ids=[102, 101])
 
@@ -118,7 +118,6 @@ def test_load_static_features_filters_by_transaction_ids(seeded_spark) -> None:
     assert "D1" in loaded.columns
 
 
-@pytest.mark.spark
 def test_build_training_frame_merges_all_sources(seeded_spark) -> None:
     dataframe = build_training_frame(seeded_spark, limit=None)
 
@@ -131,7 +130,6 @@ def test_build_training_frame_merges_all_sources(seeded_spark) -> None:
     assert set(dataframe["transaction_id"]) == {101, 102}
 
 
-@pytest.mark.spark
 def test_build_training_frame_respects_limit(seeded_spark) -> None:
     dataframe = build_training_frame(seeded_spark, limit=1)
 
@@ -139,7 +137,6 @@ def test_build_training_frame_respects_limit(seeded_spark) -> None:
     assert dataframe["transaction_id"].iloc[0] == 101
 
 
-@pytest.mark.spark
 def test_compute_transaction_features_dataframe_preserves_transaction_id_order(
     seeded_spark,
 ) -> None:
@@ -153,13 +150,11 @@ def test_compute_transaction_features_dataframe_preserves_transaction_id_order(
     assert list(dataframe["transaction_id"]) == [102, 101]
 
 
-@pytest.mark.spark
 def test_build_training_frame_raises_when_train_features_is_empty(bronze_tables) -> None:
     with pytest.raises(ValueError, match="No training rows found"):
         build_training_frame(bronze_tables)
 
 
-@pytest.mark.spark
 def test_build_training_frame_raises_when_transactions_have_no_matching_ids(
     seeded_spark,
 ) -> None:
@@ -173,7 +168,6 @@ def test_build_training_frame_raises_when_transactions_have_no_matching_ids(
         build_training_frame(seeded_spark)
 
 
-@pytest.mark.spark
 def test_build_training_frame_keeps_rows_when_behavioral_features_missing(
     seeded_spark,
     monkeypatch: pytest.MonkeyPatch,

@@ -43,6 +43,9 @@ extraPaths = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "tests"]
+addopts = "--strict-markers"
 markers = [
+    "unit: fast tests with no external infrastructure",
+    "integration: tests that exercise multiple components together",
     "spark: tests that require a local SparkSession with Delta Lake",
 ]

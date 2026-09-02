@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
 from fraud_scoring_engine.ingest.transforms import (
     count_identity_rows,
@@ -11,6 +12,8 @@ from fraud_scoring_engine.ingest.transforms import (
     prepare_identities_df,
     prepare_transactions_df,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_generate_user_id_is_deterministic() -> None:

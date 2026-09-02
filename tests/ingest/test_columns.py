@@ -1,11 +1,14 @@
 """Tests for fraud_scoring_engine.ingest.columns."""
 
 import pandas as pd
+import pytest
 
 from fraud_scoring_engine.ingest.columns import (
     FEATURE_EXCLUDE_COLUMNS,
     split_train_features,
 )
+
+pytestmark = pytest.mark.unit
 
 
 def test_split_train_features_excludes_operational_columns() -> None:

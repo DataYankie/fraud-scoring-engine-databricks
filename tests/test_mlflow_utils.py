@@ -6,6 +6,8 @@ import pytest
 
 from fraud_scoring_engine.training.mlflow_utils import setup_mlflow
 
+pytestmark = pytest.mark.unit
+
 
 @patch("fraud_scoring_engine.training.mlflow_utils.mlflow.set_experiment")
 @patch("fraud_scoring_engine.training.mlflow_utils.mlflow.set_tracking_uri")

@@ -9,6 +9,8 @@ from fraud_scoring_engine.preprocessing import (
     feature_columns,
 )
 
+pytestmark = pytest.mark.unit
+
 
 def test_feature_columns_excludes_metadata() -> None:
     frame = pd.DataFrame(

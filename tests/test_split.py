@@ -5,6 +5,8 @@ import pytest
 
 from fraud_scoring_engine.training.split import DatasetSplit, time_split
 
+pytestmark = pytest.mark.unit
+
 
 def _frame() -> pd.DataFrame:
     return pd.DataFrame(
