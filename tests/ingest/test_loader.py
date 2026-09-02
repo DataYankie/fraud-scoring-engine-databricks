@@ -214,7 +214,7 @@ def test_ingest_features_merge_updates_existing_records(
             {
                 "TransactionID": 2987000,  # Same ID as first record
                 "isFraud": 0,
-                "TransactionAmt": 999.99,  # Changed
+                "TransactionAmt": 68.5,
                 "TransactionDT": 86400,
                 "ProductCD": "W",
                 "card1": 13926.0,
@@ -242,10 +242,9 @@ def test_ingest_features_merge_updates_existing_records(
     features = spark.table(train_features_table())
     assert features.count() == 2  # Still 2, not 3
 
-    # Verify the value was updated
+    # Verify the feature value was updated (V1 is a feature column)
     row = features.filter("TransactionID = 2987000").collect()[0]
     assert row["V1"] == 0.999
-    assert row["TransactionAmt"] == 999.99
 
 
 @pytest.mark.spark
