@@ -195,7 +195,6 @@ def test_ingest_features_merge_appends_new_transactions(
     assert features.select("TransactionID").distinct().count() == 3
 
 
-@pytest.mark.spark
 def test_ingest_features_merge_updates_existing_records(
     bronze_tables,
     tmp_path: Path,
