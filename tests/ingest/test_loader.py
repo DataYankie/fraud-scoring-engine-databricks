@@ -78,6 +78,37 @@ def _write_sample_csvs(raw_dir: Path) -> None:
     identities.to_csv(raw_dir / "train_identity.csv", index=False)
 
 
+def _write_extra_transaction_csv(raw_dir: Path) -> None:
+    """Replace sample CSVs with a single new transaction for append tests."""
+    transactions = pd.DataFrame(
+        [
+            {
+                "TransactionID": 2987002,
+                "isFraud": 0,
+                "TransactionAmt": 15.0,
+                "TransactionDT": 86402,
+                "ProductCD": "W",
+                "card1": 1000.0,
+                "card2": None,
+                "card3": 150.0,
+                "card4": "visa",
+                "card5": 142.0,
+                "card6": "debit",
+                "P_emaildomain": None,
+                "R_emaildomain": None,
+                "addr1": 300.0,
+                "addr2": 87.0,
+                "dist1": 10.0,
+                "dist2": None,
+                "V1": 0.3,
+            }
+        ]
+    )
+    identities = pd.DataFrame([{"TransactionID": 2987002}])
+    transactions.to_csv(raw_dir / "train_transaction.csv", index=False)
+    identities.to_csv(raw_dir / "train_identity.csv", index=False)
+
+
 @pytest.mark.spark
 def test_ingest_merges_transactions_identities_and_features(
     bronze_tables,
@@ -121,9 +152,10 @@ def test_ingest_merges_transactions_identities_and_features(
     assert identities[0]["device_type"] == "desktop"
 
     features = spark.table(train_features_table())
-    assert "TransactionID" in features.columns
-    assert "V1" in features.columns
-    assert "isFraud" not in features.columns
+    feature_cols = features.columns  # Cache to avoid repeated Spark Connect RPC
+    assert "TransactionID" in feature_cols
+    assert "V1" in feature_cols
+    assert "isFraud" not in feature_cols
     assert features.count() == 2
 
 
@@ -138,6 +170,81 @@ def test_ingest_merge_is_idempotent(bronze_tables, tmp_path: Path) -> None:
 
     assert spark.table(transactions_table()).count() == 2
     assert spark.table(transaction_identities_table()).count() == 1
+    assert spark.table(train_features_table()).count() == 2
+
+
+@pytest.mark.spark
+def test_ingest_features_merge_appends_new_transactions(
+    bronze_tables,
+    tmp_path: Path,
+) -> None:
+    spark = bronze_tables
+    raw = tmp_path / "raw"
+    _write_sample_csvs(raw)
+
+    ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
+    assert spark.table(train_features_table()).count() == 2
+
+    _write_extra_transaction_csv(raw)
+    ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
+
+    features = spark.table(train_features_table())
+    assert features.count() == 3
+    ids = {row["TransactionID"] for row in features.select("TransactionID").collect()}
+    assert ids == {2987000, 2987001, 2987002}
+    # Verify no duplicates created
+    assert features.select("TransactionID").distinct().count() == 3
+
+
+@pytest.mark.spark
+def test_ingest_features_merge_updates_existing_records(
+    bronze_tables,
+    tmp_path: Path,
+) -> None:
+    """Verify merge updates existing records rather than duplicating."""
+    spark = bronze_tables
+    raw = tmp_path / "raw"
+    _write_sample_csvs(raw)
+
+    ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
+
+    # Modify CSV with same TransactionID but different feature value
+    transactions = pd.DataFrame(
+        [
+            {
+                "TransactionID": 2987000,  # Same ID as first record
+                "isFraud": 0,
+                "TransactionAmt": 68.5,
+                "TransactionDT": 86400,
+                "ProductCD": "W",
+                "card1": 13926.0,
+                "card2": None,
+                "card3": 150.0,
+                "card4": "discover",
+                "card5": 142.0,
+                "card6": "credit",
+                "P_emaildomain": "gmail.com",
+                "R_emaildomain": None,
+                "addr1": 315.0,
+                "addr2": 87.0,
+                "dist1": 19.0,
+                "dist2": None,
+                "V1": 0.999,  # Changed from 0.1
+            }
+        ]
+    )
+    identities = pd.DataFrame([{"TransactionID": 2987000}])
+    transactions.to_csv(raw / "train_transaction.csv", index=False)
+    identities.to_csv(raw / "train_identity.csv", index=False)
+
+    ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
+
+    features = spark.table(train_features_table())
+    assert features.count() == 2  # Still 2, not 3
+
+    # Verify the feature value was updated (V1 is a feature column)
+    row = features.filter("TransactionID = 2987000").collect()[0]
+    assert row["V1"] == 0.999
 
 
 @pytest.mark.spark

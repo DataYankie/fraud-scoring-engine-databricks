@@ -8,7 +8,7 @@ Usage:
     python scripts/ingest_ieee_transactions.py --skip-features
 
 Merges operational columns into ``fraud.bronze.transactions`` /
-``fraud.bronze.transaction_identities`` and overwrites
+``fraud.bronze.transaction_identities`` and MERGE
 ``fraud.bronze.train_features`` with the remaining CSV columns.
 
 Prerequisites:
@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-features",
         action="store_true",
-        help="MERGE operational tables only; skip train_features overwrite.",
+        help="MERGE operational tables only; skip train_features MERGE.",
     )
     return parser.parse_args()
 

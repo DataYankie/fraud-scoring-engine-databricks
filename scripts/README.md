@@ -34,7 +34,7 @@ ensure_bronze_tables(get_spark())
 Ingest also calls `ensure_bronze_tables` unless disabled.
 
 ### 3. Ingest transactions
-Operational columns MERGE into Delta. Remaining CSV columns overwrite `fraud.bronze.train_features`.
+Operational columns MERGE into Delta. Remaining CSV columns MERGE into `fraud.bronze.train_features`.
 
 #### Dev pass (10k rows)
 ```bash
