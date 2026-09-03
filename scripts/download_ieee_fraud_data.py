@@ -8,7 +8,7 @@ You must join and accept the competition rules at:
 https://www.kaggle.com/competitions/ieee-fraud-detection
 
 Default output: /Volumes/fraud/bronze/data/raw/
-Override with FRAUD_CATALOG / FRAUD_SCHEMA / FRAUD_VOLUME or --data-dir.
+Override with FRAUD_CATALOG / FRAUD_BRONZE_SCHEMA / FRAUD_VOLUME or --data-dir.
 """
 
 from __future__ import annotations

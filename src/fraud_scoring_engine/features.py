@@ -8,11 +8,11 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 
 import pandas as pd
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
+from pyspark.sql import DataFrame, SparkSession 
+from pyspark.sql import functions as F 
 
-from fraud_scoring_engine.config import behavioral_features_table, transactions_table
-from fraud_scoring_engine.delta.schema import ensure_bronze_tables
+from fraud_scoring_engine.config import gold_table, silver_table
+from fraud_scoring_engine.delta.schema import ensure_gold_tables, ensure_silver_tables
 from fraud_scoring_engine.spark_session import get_spark
 
 
@@ -25,8 +25,11 @@ def _prior_filter(
     transaction_id: int | None = None,
     table: str | None = None,
 ) -> DataFrame:
-    """Return prior transactions for a user within a rolling window."""
-    target = table or transactions_table()
+    """Return prior transactions for a user within a rolling window.
+
+    Defaults to the silver ``transactions`` table (cleaned entities).
+    """
+    target = table or silver_table("transactions")
     window_start = transaction_at - window
     df = spark.table(target).filter(
         (F.col("derived_user_id") == derived_user_id)
@@ -215,8 +218,8 @@ def _fetch_all_transaction_rows(
     *,
     table: str | None = None,
 ) -> list[_TxnRow]:
-    """Load all transactions in chronological order."""
-    target = table or transactions_table()
+    """Load all transactions in chronological order from silver by default."""
+    target = table or silver_table("transactions")
     rows = (
         spark.table(target)
         .orderBy("transaction_at", "transaction_id")
@@ -320,21 +323,25 @@ def write_behavioral_features(
     output_table: str | None = None,
     ensure_tables: bool = True,
 ) -> int:
-    """Compute behavioral features and overwrite the Delta output table.
+    """Compute behavioral features and overwrite the gold Delta output table.
+
+    Reads cleaned transactions from silver (or ``table``) and writes to gold
+    ``behavioral_features`` (or ``output_table``).
 
     Returns:
         Number of rows written.
     """
     session = spark if spark is not None else get_spark()
     if ensure_tables:
-        ensure_bronze_tables(session)
+        ensure_silver_tables(session)
+        ensure_gold_tables(session)
 
     dataframe = compute_transaction_features_dataframe(
         session,
         limit=limit,
         table=table,
     )
-    target = output_table or behavioral_features_table()
+    target = output_table or gold_table("behavioral_features")
     if dataframe.empty:
         session.createDataFrame([], schema=session.table(target).schema).write.format(
             "delta"

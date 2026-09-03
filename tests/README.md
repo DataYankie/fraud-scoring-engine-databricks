@@ -10,6 +10,7 @@
 - `test_preprocessing.py` - `FraudFeaturePreprocessor`
 - `test_split.py` - time-based dataset splits
 - `test_dataset.py` - training frame assembly
+- `test_silver.py` - bronze → silver promotion
 - `test_mlflow_utils.py` - MLflow setup helpers
 - `test_paths.py` - Volume and CSV path helpers
 - `ingest/` - ingest module tests (see [ingest/README.md](ingest/README.md))

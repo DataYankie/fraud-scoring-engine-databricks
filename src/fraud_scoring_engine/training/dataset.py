@@ -1,8 +1,13 @@
-"""Assemble training datasets from Delta bronze tables.
+"""Assemble training datasets from medallion Delta tables.
 
 This module loads, joins, and fills the transaction, identity, and behavioral
 features needed for model experiments, producing merged frames for training and
 evaluation workflows.
+
+Sources:
+* bronze ``train_features`` - wide IEEE static columns
+* silver ``transactions`` / ``transaction_identities`` - cleaned entities
+* on-the-fly (or gold) behavioral rolling features
 """
 
 from __future__ import annotations
@@ -14,11 +19,7 @@ import pandas as pd
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
-from fraud_scoring_engine.config import (
-    train_features_table,
-    transaction_identities_table,
-    transactions_table,
-)
+from fraud_scoring_engine.config import bronze_table, silver_table
 from fraud_scoring_engine.features import (
     BEHAVIORAL_FEATURE_COLUMNS,
     DEFAULT_BEHAVIORAL_FEATURES,
@@ -76,8 +77,8 @@ def load_transaction_model_columns(
         :data:`TRANSACTION_MODEL_COLUMNS`.
     """
     session = spark if spark is not None else get_spark()
-    joined = session.table(transactions_table()).join(
-        session.table(transaction_identities_table()),
+    joined = session.table(silver_table("transactions")).join(
+        session.table(silver_table("transaction_identities")),
         on="transaction_id",
         how="left",
     )
@@ -115,7 +116,7 @@ def load_static_features(
         Static feature DataFrame keyed by ``transaction_id``.
     """
     session = spark if spark is not None else get_spark()
-    target = table or train_features_table()
+    target = table or bronze_table("train_features")
     static = session.table(target).toPandas()
     if "TransactionID" in static.columns:
         static = static.rename(columns={"TransactionID": "transaction_id"})
@@ -156,12 +157,12 @@ def build_training_frame(
     limit: int | None = 10_000,
     train_features: str | None = None,
 ) -> pd.DataFrame:
-    """Build a unified training DataFrame from bronze Delta tables.
+    """Build a unified training DataFrame from medallion Delta tables.
 
-    Static IEEE columns come from ``train_features``. Operational and identity
-    columns are read from ``transactions`` / ``transaction_identities``. Rolling
-    behavioral features are computed on the fly and left-joined so every matched
-    transaction is kept.
+    Static IEEE columns come from bronze ``train_features``. Operational and
+    identity columns are read from silver ``transactions`` /
+    ``transaction_identities``. Rolling behavioral features are computed on the
+    fly from silver history and left-joined so every matched transaction is kept.
 
     Row scope follows the train_features slice: when ``limit`` is set, the first
     ``limit`` rows from that table define ``transaction_id`` values. Behavioral
@@ -183,7 +184,7 @@ def build_training_frame(
             the transactions table.
     """
     session = spark if spark is not None else get_spark()
-    features_table = train_features or train_features_table()
+    features_table = train_features or bronze_table("train_features")
 
     static = load_static_features(session, limit=limit, table=features_table)
     if static.empty:
@@ -207,7 +208,7 @@ def build_training_frame(
     merged = static.merge(operational, on="transaction_id", how="inner")
     if merged.empty:
         msg = (
-            f"No rows matched between {features_table} and {transactions_table()} "
+            f"No rows matched between {features_table} and {silver_table('transactions')} "
             f"for {len(transaction_ids)} train_features transaction_id(s). "
             "Ensure ingest loaded the same transaction slice into Delta."
         )

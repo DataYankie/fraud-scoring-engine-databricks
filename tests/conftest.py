@@ -10,6 +10,9 @@ import pytest
 UC_ENV_KEYS = (
     "FRAUD_CATALOG",
     "FRAUD_SCHEMA",
+    "FRAUD_BRONZE_SCHEMA",
+    "FRAUD_SILVER_SCHEMA",
+    "FRAUD_GOLD_SCHEMA",
     "FRAUD_VOLUME",
 )
 
@@ -26,7 +29,9 @@ def uc_env(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     """Set canonical FRAUD_* values for config tests."""
     values = {
         "FRAUD_CATALOG": "fraud",
-        "FRAUD_SCHEMA": "bronze",
+        "FRAUD_BRONZE_SCHEMA": "bronze",
+        "FRAUD_SILVER_SCHEMA": "silver",
+        "FRAUD_GOLD_SCHEMA": "gold",
         "FRAUD_VOLUME": "data",
     }
     for key, value in values.items():
@@ -83,50 +88,64 @@ def spark(tmp_path_factory: pytest.TempPathFactory) -> Iterator[object]:
         session.stop()
 
 
+def _drop_schema(spark, catalog: str, schema: str) -> None:
+    try:
+        spark.sql(f"DROP SCHEMA IF EXISTS {catalog}.{schema} CASCADE")
+    except Exception:
+        pass
+
+
 @pytest.fixture
-def bronze_tables(spark, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
-    """Configure test catalog/schema and create bronze Delta tables."""
+def medallion_tables(spark, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    """Configure test catalog/schemas and create bronze, silver, and gold Delta tables."""
     import os
     import uuid
-    
+
     # Check if running in Databricks with Unity Catalog
     is_databricks = "SPARK_REMOTE" in os.environ
-    
+
     if is_databricks:
         # Use a dedicated test catalog (create it if it doesn't exist)
         # Or use workspace catalog for ephemeral test data
         test_catalog = "workspace"  # workspace catalog is for temporary/test data
         monkeypatch.setenv("FRAUD_CATALOG", test_catalog)
-        
-        # Create a unique schema per test run to avoid collisions
-        test_schema = f"fraud_test_{uuid.uuid4().hex[:8]}"
-        monkeypatch.setenv("FRAUD_SCHEMA", test_schema)
+
+        # Create unique schemas per test run to avoid collisions
+        suffix = uuid.uuid4().hex[:8]
+        monkeypatch.setenv("FRAUD_BRONZE_SCHEMA", f"fraud_test_{suffix}_bronze")
+        monkeypatch.setenv("FRAUD_SILVER_SCHEMA", f"fraud_test_{suffix}_silver")
+        monkeypatch.setenv("FRAUD_GOLD_SCHEMA", f"fraud_test_{suffix}_gold")
     else:
         # Local development uses spark_catalog
         monkeypatch.setenv("FRAUD_CATALOG", "spark_catalog")
-        monkeypatch.setenv("FRAUD_SCHEMA", "fraud_test")
+        monkeypatch.setenv("FRAUD_BRONZE_SCHEMA", "fraud_test_bronze")
+        monkeypatch.setenv("FRAUD_SILVER_SCHEMA", "fraud_test_silver")
+        monkeypatch.setenv("FRAUD_GOLD_SCHEMA", "fraud_test_gold")
     monkeypatch.setenv("FRAUD_VOLUME", "data")
 
-    from fraud_scoring_engine.delta.schema import ensure_bronze_tables
-    from fraud_scoring_engine.config import get_catalog, get_schema
+    from fraud_scoring_engine.config import (
+        get_bronze_schema,
+        get_catalog,
+        get_gold_schema,
+        get_silver_schema,
+    )
+    from fraud_scoring_engine.delta.schema import ensure_medallion_tables
 
-    cleanup_catalog = get_catalog()
-    cleanup_schema = get_schema()
-    try:
-        spark.sql(f"DROP SCHEMA IF EXISTS {cleanup_catalog}.{cleanup_schema} CASCADE")
-    except Exception:
-        pass
+    catalog = get_catalog()
+    schemas = (get_bronze_schema(), get_silver_schema(), get_gold_schema())
+    for schema in schemas:
+        _drop_schema(spark, catalog, schema)
 
-    ensure_bronze_tables(spark)
+    ensure_medallion_tables(spark)
     yield spark
-    
-    # Cleanup: ALWAYS drop the test schema to avoid leaving test data
-    cleanup_catalog = get_catalog()
-    cleanup_schema = get_schema()
-    try:
-        spark.sql(f"DROP SCHEMA IF EXISTS {cleanup_catalog}.{cleanup_schema} CASCADE")
-    except Exception as e:
-        # Log cleanup failure but don't fail the test
-        # In CI/CD, you may want to fail here to catch cleanup issues
-        import warnings
-        warnings.warn(f"Failed to cleanup test schema {cleanup_catalog}.{cleanup_schema}: {e}")
+
+    # Cleanup: ALWAYS drop the test schemas to avoid leaving test data
+    catalog = get_catalog()
+    schemas = (get_bronze_schema(), get_silver_schema(), get_gold_schema())
+    for schema in schemas:
+        try:
+            spark.sql(f"DROP SCHEMA IF EXISTS {catalog}.{schema} CASCADE")
+        except Exception as e:
+            import warnings
+
+            warnings.warn(f"Failed to cleanup test schema {catalog}.{schema}: {e}")

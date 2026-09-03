@@ -7,12 +7,8 @@ from pathlib import Path
 
 from pyspark.sql import DataFrame, SparkSession # type: ignore
 
-from fraud_scoring_engine.config import (
-    train_features_table,
-    transaction_identities_table,
-    transactions_table,
-)
-from fraud_scoring_engine.delta.schema import ensure_bronze_tables
+from fraud_scoring_engine.config import bronze_table
+from fraud_scoring_engine.delta.schema import ensure_bronze_tables, ensure_medallion_tables
 from fraud_scoring_engine.ingest.paths import IeeeDataPaths, ieee_data_paths
 from fraud_scoring_engine.ingest.spark_transforms import (
     count_identity_rows_spark,
@@ -20,6 +16,7 @@ from fraud_scoring_engine.ingest.spark_transforms import (
     prepare_transactions_spark,
     split_train_features_spark,
 )
+from fraud_scoring_engine.silver import promote_bronze_to_silver
 from fraud_scoring_engine.spark_session import get_spark
 
 TRANSACTION_MERGE_COLUMNS = (
@@ -62,6 +59,8 @@ class IngestResult:
     identities_merged: int
     feature_rows: int
     features_table: str | None
+    silver_transactions: int
+    silver_identities: int
 
 
 def _read_csv(spark: SparkSession, path: Path) -> DataFrame:
@@ -163,12 +162,15 @@ def ingest_train_transactions(
     dry_run: bool = False,
     skip_tables: bool = False,
     skip_features: bool = False,
+    promote_silver: bool = True,
     ensure_tables: bool = True,
 ) -> IngestResult:
     """Load train IEEE data from Volume CSVs into bronze Delta tables.
 
-    Operational columns are MERGEd into ``transactions`` / ``transaction_identities``.
-    Remaining CSV columns (plus ``TransactionID``) are MERGEd into ``train_features``.
+    Operational columns are MERGEd into bronze ``transactions`` /
+    ``transaction_identities``. Remaining CSV columns (plus ``TransactionID``)
+    are MERGEd into bronze ``train_features``. When ``promote_silver`` is True
+    and operational tables were written, cleaned copies are promoted to silver.
 
     Args:
         spark: Optional SparkSession; defaults to :func:`get_spark`.
@@ -177,7 +179,9 @@ def ingest_train_transactions(
         dry_run: If True, report counts only; do not write Delta tables.
         skip_tables: If True, write train_features only.
         skip_features: If True, MERGE operational tables only.
-        ensure_tables: If True, create bronze schema/tables when missing.
+        promote_silver: If True, promote bronze operational tables to silver
+            after a successful non-dry-run table MERGE.
+        ensure_tables: If True, create medallion schemas/tables when missing.
 
     Returns:
         Summary counts for the ingest run.
@@ -190,7 +194,10 @@ def ingest_train_transactions(
     paths: IeeeDataPaths = ieee_data_paths(data_dir)
 
     if ensure_tables and not dry_run:
-        ensure_bronze_tables(session)
+        if promote_silver and not skip_tables:
+            ensure_medallion_tables(session)
+        else:
+            ensure_bronze_tables(session)
 
     merged = load_merged_train_spark(
         session,
@@ -204,11 +211,13 @@ def ingest_train_transactions(
     features_table_name: str | None = None
     rows_merged = 0
     identities_merged = 0
+    silver_transactions = 0
+    silver_identities = 0
 
     if not skip_features:
         features = split_train_features_spark(merged)
         feature_rows = features.count()
-        features_table_name = train_features_table()
+        features_table_name = bronze_table("train_features")
         if not dry_run:
             _write_features(session, features, features_table_name)
 
@@ -226,6 +235,8 @@ def ingest_train_transactions(
             identities_merged=identity_count,
             feature_rows=feature_rows,
             features_table=features_table_name,
+            silver_transactions=0,
+            silver_identities=0,
         )
 
     if not skip_tables:
@@ -234,17 +245,24 @@ def ingest_train_transactions(
         rows_merged = _merge_delta(
             session,
             transactions_df,
-            target_table=transactions_table(),
+            target_table=bronze_table("transactions"),
             key="transaction_id",
             columns=TRANSACTION_MERGE_COLUMNS,
         )
         identities_merged = _merge_delta(
             session,
             identities_df,
-            target_table=transaction_identities_table(),
+            target_table=bronze_table("transaction_identities"),
             key="transaction_id",
             columns=IDENTITY_MERGE_COLUMNS,
         )
+        if promote_silver:
+            promote = promote_bronze_to_silver(
+                spark=session,
+                ensure_tables=ensure_tables,
+            )
+            silver_transactions = promote.transactions_written
+            silver_identities = promote.identities_written
 
     parts = [
         f"read={rows_read}",
@@ -254,6 +272,9 @@ def ingest_train_transactions(
     if not skip_features:
         parts.append(f"feature_rows={feature_rows}")
         parts.append(f"features_table={features_table_name}")
+    if silver_transactions or silver_identities:
+        parts.append(f"silver_transactions={silver_transactions}")
+        parts.append(f"silver_identities={silver_identities}")
     print(f"Ingest complete: {', '.join(parts)}")
 
     return IngestResult(
@@ -262,4 +283,6 @@ def ingest_train_transactions(
         identities_merged=identities_merged,
         feature_rows=feature_rows,
         features_table=features_table_name,
+        silver_transactions=silver_transactions,
+        silver_identities=silver_identities,
     )

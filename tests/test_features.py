@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from spark_helpers import write_delta_table
-from fraud_scoring_engine.config import transactions_table
+from fraud_scoring_engine.config import silver_table
 from fraud_scoring_engine.features import (
     compute_avg_amount_ratio,
     compute_cumulative_spend,
@@ -26,13 +26,13 @@ pytestmark = [pytest.mark.integration, pytest.mark.spark]
 
 
 def _seed_transactions(spark, rows: list[dict]) -> None:
-    write_delta_table(spark, transactions_table(), rows)
+    write_delta_table(spark, silver_table("transactions"), rows)
 
 
 @pytest.fixture
-def seeded_spark(bronze_tables):
+def seeded_spark(medallion_tables):
     """Seed transactions for USER_A with controlled times and amounts."""
-    spark = bronze_tables
+    spark = medallion_tables
     rows = [
         {
             "transaction_id": 1,
@@ -144,8 +144,8 @@ def seeded_spark(bronze_tables):
     return spark
 
 
-def test_first_transaction_has_zero_velocity_and_spend(bronze_tables) -> None:
-    spark = bronze_tables
+def test_first_transaction_has_zero_velocity_and_spend(medallion_tables) -> None:
+    spark = medallion_tables
     _seed_transactions(
         spark,
         [
@@ -254,8 +254,8 @@ def test_avg_amount_ratio_spikes_for_large_current_amount(seeded_spark) -> None:
     assert ratio_90d == pytest.approx(2000.0 / 20.0)
 
 
-def test_null_derived_user_id_returns_safe_defaults(bronze_tables) -> None:
-    spark = bronze_tables
+def test_null_derived_user_id_returns_safe_defaults(medallion_tables) -> None:
+    spark = medallion_tables
     assert (
         compute_velocity(
             spark,
@@ -347,7 +347,7 @@ def test_compute_transaction_features_dataframe_matches_row_by_row(seeded_spark)
 
     for _, row in dataframe.iterrows():
         txn = (
-            seeded_spark.table(transactions_table())
+            seeded_spark.table(silver_table("transactions"))
             .filter(f"transaction_id = {int(row['transaction_id'])}")
             .collect()[0]
         )
