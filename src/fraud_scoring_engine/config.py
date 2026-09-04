@@ -1,4 +1,14 @@
-"""Databricks Unity Catalog, Volume, and MLflow configuration."""
+"""Databricks Unity Catalog, Volume, and MLflow configuration.
+
+Medallion architecture uses one catalog with three schemas:
+
+* **bronze** - landing Volume + source-aligned Delta tables
+* **silver** - cleaned / conformed transaction entities
+* **gold** - behavioral features and serving-oriented tables
+
+Qualified table names are built with ``bronze_table``, ``silver_table``, and
+``gold_table``, so the layer is always explicit at the call site.
+"""
 
 from __future__ import annotations
 
@@ -11,49 +21,57 @@ def get_catalog() -> str:
     return os.environ.get("FRAUD_CATALOG", "fraud")
 
 
-def get_schema() -> str:
-    """Return the schema name (default ``bronze``)."""
-    return os.environ.get("FRAUD_SCHEMA", "bronze")
+def get_bronze_schema() -> str:
+    """Return the bronze schema name (default ``bronze``).
+
+    ``FRAUD_BRONZE_SCHEMA`` wins when set; otherwise ``FRAUD_SCHEMA`` is used
+    for backward compatibility with earlier single-schema setups.
+    """
+    return os.environ.get("FRAUD_BRONZE_SCHEMA") or os.environ.get("FRAUD_SCHEMA", "bronze")
+
+
+def get_silver_schema() -> str:
+    """Return the silver schema name (default ``silver``)."""
+    return os.environ.get("FRAUD_SILVER_SCHEMA", "silver")
+
+
+def get_gold_schema() -> str:
+    """Return the gold schema name (default ``gold``)."""
+    return os.environ.get("FRAUD_GOLD_SCHEMA", "gold")
 
 
 def get_volume_name() -> str:
-    """Return the Volume name under the catalog/schema (default ``data``)."""
+    """Return the Volume name under the catalog/bronze schema (default ``data``)."""
     return os.environ.get("FRAUD_VOLUME", "data")
 
 
 def volume_root() -> str:
-    """Return the Volume root path ``/Volumes/{catalog}/{schema}/{volume}``."""
-    return f"/Volumes/{get_catalog()}/{get_schema()}/{get_volume_name()}"
+    """Return the Volume root path ``/Volumes/{catalog}/{bronze}/{volume}``.
+
+    Raw CSVs land under ``{volume_root}/raw/``. The Volume stays in bronze so
+    landing files remain with the source-aligned layer.
+    """
+    return f"/Volumes/{get_catalog()}/{get_bronze_schema()}/{get_volume_name()}"
 
 
-def table_name(table: str) -> str:
+def table_name(table: str, *, schema: str) -> str:
     """Return a fully qualified table name ``{catalog}.{schema}.{table}``."""
-    return f"{get_catalog()}.{get_schema()}.{table}"
+    return f"{get_catalog()}.{schema}.{table}"
 
 
-def transactions_table() -> str:
-    """Return the fully qualified transactions table name."""
-    return table_name("transactions")
+def bronze_table(table: str) -> str:
+    """Return a fully qualified bronze table name."""
+    return table_name(table, schema=get_bronze_schema())
 
 
-def transaction_identities_table() -> str:
-    """Return the fully qualified transaction_identities table name."""
-    return table_name("transaction_identities")
+def silver_table(table: str) -> str:
+    """Return a fully qualified silver table name."""
+    return table_name(table, schema=get_silver_schema())
 
 
-def train_features_table() -> str:
-    """Return the fully qualified train_features table name."""
-    return table_name("train_features")
-
-
-def behavioral_features_table() -> str:
-    """Return the fully qualified behavioral_features table name."""
-    return table_name("behavioral_features")
-
-
-def fraud_alerts_table() -> str:
-    """Return the fully qualified fraud_alerts table name."""
-    return table_name("fraud_alerts")
+def gold_table(table: str) -> str:
+    """Return a fully qualified gold table name."""
+    return table_name(table, schema=get_gold_schema())
 
 
 def get_mlflow_tracking_uri() -> str:

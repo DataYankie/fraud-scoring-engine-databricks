@@ -1,6 +1,7 @@
 # ingest
 
-**Purpose:** IEEE-CIS transaction CSV loading, column mapping, and Spark transforms for bronze ingest and MERGE into Delta tables.
+**Purpose:** IEEE-CIS transaction CSV loading, column mapping, and Spark transforms
+for bronze ingest (and optional silver promotion) into Delta tables.
 
 ## Contents
 
@@ -14,5 +15,6 @@
 
 - [fraud_scoring_engine/README.md](../README.md)
 - [delta/README.md](../delta/README.md) - target table schemas
+- [silver/README.md](../silver/README.md) - bronze → silver promotion
 - [tests/ingest/README.md](../../../tests/ingest/README.md) - unit tests for this module
 - [scripts/README.md](../../../scripts/README.md) - `ingest_ieee_transactions.py` CLI

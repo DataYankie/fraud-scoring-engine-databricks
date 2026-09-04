@@ -4,7 +4,7 @@
 
 ## Contents
 
-- `dataset.py` - `build_training_frame` and static feature loaders from bronze Delta tables
+- `dataset.py` - `build_training_frame` from bronze static features + silver entities
 - `split.py` - time-based `time_split` with configurable ratios
 - `mlflow_utils.py` - `setup_mlflow` for experiment tracking configuration
 

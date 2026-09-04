@@ -1,17 +1,17 @@
-"""Delta table schemas and bronze bootstrap for Unity Catalog."""
+"""Delta table schemas and create-if-missing helpers for Unity Catalog."""
 
 from __future__ import annotations
 
-from pyspark.sql import SparkSession # type: ignore
+from pyspark.sql import SparkSession  # type: ignore
 
 from fraud_scoring_engine.config import (
-    behavioral_features_table,
-    fraud_alerts_table,
+    bronze_table,
+    get_bronze_schema,
     get_catalog,
-    get_schema,
-    train_features_table,
-    transaction_identities_table,
-    transactions_table,
+    get_gold_schema,
+    get_silver_schema,
+    gold_table,
+    silver_table,
 )
 
 TRANSACTIONS_DDL = """
@@ -77,14 +77,35 @@ CREATE TABLE IF NOT EXISTS {table} (
 """
 
 
-def ensure_bronze_tables(spark: SparkSession) -> None:
-    """Create the bronze schema and Delta tables if they do not exist."""
+def _ensure_schema(spark: SparkSession, schema: str) -> None:
     catalog = get_catalog()
-    schema = get_schema()
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{schema}")
 
-    spark.sql(TRANSACTIONS_DDL.format(table=transactions_table()))
-    spark.sql(TRANSACTION_IDENTITIES_DDL.format(table=transaction_identities_table()))
-    spark.sql(FRAUD_ALERTS_DDL.format(table=fraud_alerts_table()))
-    spark.sql(BEHAVIORAL_FEATURES_DDL.format(table=behavioral_features_table()))
-    spark.sql(TRAIN_FEATURES_DDL.format(table=train_features_table()))
+
+def ensure_bronze_tables(spark: SparkSession) -> None:
+    """Create the bronze schema and source-aligned Delta tables if missing."""
+    _ensure_schema(spark, get_bronze_schema())
+    spark.sql(TRANSACTIONS_DDL.format(table=bronze_table("transactions")))
+    spark.sql(TRANSACTION_IDENTITIES_DDL.format(table=bronze_table("transaction_identities")))
+    spark.sql(TRAIN_FEATURES_DDL.format(table=bronze_table("train_features")))
+
+
+def ensure_silver_tables(spark: SparkSession) -> None:
+    """Create the silver schema and cleaned entity Delta tables if missing."""
+    _ensure_schema(spark, get_silver_schema())
+    spark.sql(TRANSACTIONS_DDL.format(table=silver_table("transactions")))
+    spark.sql(TRANSACTION_IDENTITIES_DDL.format(table=silver_table("transaction_identities")))
+
+
+def ensure_gold_tables(spark: SparkSession) -> None:
+    """Create the gold schema and feature/serving Delta tables if missing."""
+    _ensure_schema(spark, get_gold_schema())
+    spark.sql(BEHAVIORAL_FEATURES_DDL.format(table=gold_table("behavioral_features")))
+    spark.sql(FRAUD_ALERTS_DDL.format(table=gold_table("fraud_alerts")))
+
+
+def ensure_medallion_tables(spark: SparkSession) -> None:
+    """Create bronze, silver, and gold schemas/tables if they do not exist."""
+    ensure_bronze_tables(spark)
+    ensure_silver_tables(spark)
+    ensure_gold_tables(spark)

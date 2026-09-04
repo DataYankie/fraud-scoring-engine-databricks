@@ -1,4 +1,4 @@
-"""Ingest IEEE-CIS train transactions into Unity Catalog Delta tables.
+"""Ingest IEEE-CIS train transactions into Unity Catalog bronze Delta tables.
 
 Usage:
     python scripts/ingest_ieee_transactions.py --limit 10000
@@ -6,10 +6,12 @@ Usage:
     python scripts/ingest_ieee_transactions.py --limit 100 --dry-run
     python scripts/ingest_ieee_transactions.py --skip-tables --limit 10000
     python scripts/ingest_ieee_transactions.py --skip-features
+    python scripts/ingest_ieee_transactions.py --skip-silver
 
 Merges operational columns into ``fraud.bronze.transactions`` /
 ``fraud.bronze.transaction_identities`` and MERGE
-``fraud.bronze.train_features`` with the remaining CSV columns.
+``fraud.bronze.train_features`` with the remaining CSV columns. By default also
+promotes cleaned operational tables to silver.
 
 Prerequisites:
     - Raw CSVs in /Volumes/fraud/bronze/data/raw/ (see download_ieee_fraud_data.py)
@@ -19,16 +21,9 @@ Prerequisites:
 
 from __future__ import annotations
 
-import subprocess
-import sys
 import argparse
 from pathlib import Path
 
-# Install fraud_scoring_engine package for this script execution
-subprocess.check_call([
-    sys.executable, "-m", "pip", "install", "-q",
-    "/Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine"
-])
 from fraud_scoring_engine.ingest.loader import ingest_train_transactions
 
 
@@ -36,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Ingest IEEE-CIS train data into bronze Delta tables "
-            "(transactions, identities, train_features)."
+            "(transactions, identities, train_features) and optionally promote silver."
         ),
     )
     parser.add_argument(
@@ -66,6 +61,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="MERGE operational tables only; skip train_features MERGE.",
     )
+    parser.add_argument(
+        "--skip-silver",
+        action="store_true",
+        help="Skip bronze → silver promotion after operational MERGE.",
+    )
     return parser.parse_args()
 
 
@@ -77,6 +77,7 @@ def main() -> None:
         dry_run=args.dry_run,
         skip_tables=args.skip_tables,
         skip_features=args.skip_features,
+        promote_silver=not args.skip_silver,
     )
 
 

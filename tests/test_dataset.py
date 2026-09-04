@@ -8,11 +8,7 @@ import pandas as pd
 import pytest
 
 from spark_helpers import write_delta_table
-from fraud_scoring_engine.config import (
-    train_features_table,
-    transaction_identities_table,
-    transactions_table,
-)
+from fraud_scoring_engine.config import bronze_table, silver_table
 from fraud_scoring_engine.training.dataset import (
     TRANSACTION_TRAINING_COLUMNS,
     build_training_frame,
@@ -52,11 +48,11 @@ def _txn_row(transaction_id: int, **overrides: object) -> dict[str, object]:
 
 
 @pytest.fixture
-def seeded_spark(bronze_tables):
-    spark = bronze_tables
+def seeded_spark(medallion_tables):
+    spark = medallion_tables
     write_delta_table(
         spark,
-        transactions_table(),
+        silver_table("transactions"),
         [
             _txn_row(101, derived_user_id="a" * 32, is_fraud=0, transaction_amt=50.0, card1=100.0),
             _txn_row(
@@ -74,7 +70,7 @@ def seeded_spark(bronze_tables):
     )
     write_delta_table(
         spark,
-        transaction_identities_table(),
+        silver_table("transaction_identities"),
         [
             {
                 "transaction_id": 101,
@@ -87,7 +83,7 @@ def seeded_spark(bronze_tables):
     )
     write_delta_table(
         spark,
-        train_features_table(),
+        bronze_table("train_features"),
         [
             {"TransactionID": 101, "C1": 1.0, "D1": 10.0},
             {"TransactionID": 102, "C1": 2.0, "D1": 20.0},
@@ -150,9 +146,9 @@ def test_compute_transaction_features_dataframe_preserves_transaction_id_order(
     assert list(dataframe["transaction_id"]) == [102, 101]
 
 
-def test_build_training_frame_raises_when_train_features_is_empty(bronze_tables) -> None:
+def test_build_training_frame_raises_when_train_features_is_empty(medallion_tables) -> None:
     with pytest.raises(ValueError, match="No training rows found"):
-        build_training_frame(bronze_tables)
+        build_training_frame(medallion_tables)
 
 
 def test_build_training_frame_raises_when_transactions_have_no_matching_ids(
@@ -160,7 +156,7 @@ def test_build_training_frame_raises_when_transactions_have_no_matching_ids(
 ) -> None:
     write_delta_table(
         seeded_spark,
-        train_features_table(),
+        bronze_table("train_features"),
         [{"TransactionID": 999, "C1": 1.0}],
     )
 

@@ -7,11 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from fraud_scoring_engine.config import (
-    train_features_table,
-    transaction_identities_table,
-    transactions_table,
-)
+from fraud_scoring_engine.config import bronze_table, silver_table
 from fraud_scoring_engine.ingest.loader import ingest_train_transactions
 from fraud_scoring_engine.ingest.transforms import generate_user_id_from_components
 
@@ -112,10 +108,10 @@ def _write_extra_transaction_csv(raw_dir: Path) -> None:
 
 
 def test_ingest_merges_transactions_identities_and_features(
-    bronze_tables,
+    medallion_tables,
     tmp_path: Path,
 ) -> None:
-    spark = bronze_tables
+    spark = medallion_tables
     raw = tmp_path / "raw"
     _write_sample_csvs(raw)
 
@@ -129,9 +125,12 @@ def test_ingest_merges_transactions_identities_and_features(
     assert result.rows_merged == 2
     assert result.identities_merged == 1
     assert result.feature_rows == 2
-    assert result.features_table == train_features_table()
+    assert result.features_table == bronze_table("train_features")
+    assert result.silver_transactions == 2
+    assert result.silver_identities == 1
 
-    txns = spark.table(transactions_table()).orderBy("transaction_id").collect()
+    assert spark.table(bronze_table("transactions")).count() == 2
+    txns = spark.table(silver_table("transactions")).orderBy("transaction_id").collect()
     assert len(txns) == 2
     assert txns[0]["transaction_id"] == 2987000
     expected_uid = generate_user_id_from_components(
@@ -148,11 +147,11 @@ def test_ingest_merges_transactions_identities_and_features(
     )
     assert txns[0]["derived_user_id"] == expected_uid
 
-    identities = spark.table(transaction_identities_table()).collect()
+    identities = spark.table(silver_table("transaction_identities")).collect()
     assert len(identities) == 1
     assert identities[0]["device_type"] == "desktop"
 
-    features = spark.table(train_features_table())
+    features = spark.table(bronze_table("train_features"))
     feature_cols = features.columns  # Cache to avoid repeated Spark Connect RPC
     assert "TransactionID" in feature_cols
     assert "V1" in feature_cols
@@ -160,34 +159,34 @@ def test_ingest_merges_transactions_identities_and_features(
     assert features.count() == 2
 
 
-def test_ingest_merge_is_idempotent(bronze_tables, tmp_path: Path) -> None:
-    spark = bronze_tables
+def test_ingest_merge_is_idempotent(medallion_tables, tmp_path: Path) -> None:
+    spark = medallion_tables
     raw = tmp_path / "raw"
     _write_sample_csvs(raw)
 
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
 
-    assert spark.table(transactions_table()).count() == 2
-    assert spark.table(transaction_identities_table()).count() == 1
-    assert spark.table(train_features_table()).count() == 2
+    assert spark.table(silver_table("transactions")).count() == 2
+    assert spark.table(silver_table("transaction_identities")).count() == 1
+    assert spark.table(bronze_table("train_features")).count() == 2
 
 
 def test_ingest_features_merge_appends_new_transactions(
-    bronze_tables,
+    medallion_tables,
     tmp_path: Path,
 ) -> None:
-    spark = bronze_tables
+    spark = medallion_tables
     raw = tmp_path / "raw"
     _write_sample_csvs(raw)
 
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
-    assert spark.table(train_features_table()).count() == 2
+    assert spark.table(bronze_table("train_features")).count() == 2
 
     _write_extra_transaction_csv(raw)
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
 
-    features = spark.table(train_features_table())
+    features = spark.table(bronze_table("train_features"))
     assert features.count() == 3
     ids = {row["TransactionID"] for row in features.select("TransactionID").collect()}
     assert ids == {2987000, 2987001, 2987002}
@@ -196,11 +195,11 @@ def test_ingest_features_merge_appends_new_transactions(
 
 
 def test_ingest_features_merge_updates_existing_records(
-    bronze_tables,
+    medallion_tables,
     tmp_path: Path,
 ) -> None:
     """Verify merge updates existing records rather than duplicating."""
-    spark = bronze_tables
+    spark = medallion_tables
     raw = tmp_path / "raw"
     _write_sample_csvs(raw)
 
@@ -237,7 +236,7 @@ def test_ingest_features_merge_updates_existing_records(
 
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
 
-    features = spark.table(train_features_table())
+    features = spark.table(bronze_table("train_features"))
     assert features.count() == 2  # Still 2, not 3
 
     # Verify the feature value was updated (V1 is a feature column)
@@ -245,8 +244,8 @@ def test_ingest_features_merge_updates_existing_records(
     assert row["V1"] == 0.999
 
 
-def test_ingest_dry_run_writes_nothing(bronze_tables, tmp_path: Path) -> None:
-    spark = bronze_tables
+def test_ingest_dry_run_writes_nothing(medallion_tables, tmp_path: Path) -> None:
+    spark = medallion_tables
     raw = tmp_path / "raw"
     _write_sample_csvs(raw)
 
@@ -258,4 +257,22 @@ def test_ingest_dry_run_writes_nothing(bronze_tables, tmp_path: Path) -> None:
     )
     assert result.rows_read == 2
     assert result.rows_merged == 0
-    assert spark.table(transactions_table()).count() == 0
+    assert spark.table(bronze_table("transactions")).count() == 0
+    assert spark.table(silver_table("transactions")).count() == 0
+
+
+def test_ingest_skip_silver_leaves_silver_empty(medallion_tables, tmp_path: Path) -> None:
+    spark = medallion_tables
+    raw = tmp_path / "raw"
+    _write_sample_csvs(raw)
+
+    result = ingest_train_transactions(
+        spark=spark,
+        data_dir=raw,
+        ensure_tables=False,
+        promote_silver=False,
+    )
+    assert result.rows_merged == 2
+    assert result.silver_transactions == 0
+    assert spark.table(bronze_table("transactions")).count() == 2
+    assert spark.table(silver_table("transactions")).count() == 0

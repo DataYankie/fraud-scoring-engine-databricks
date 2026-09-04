@@ -1,14 +1,24 @@
 # delta
 
-**Purpose:** Delta Lake bronze table schemas and bootstrap helpers for Unity Catalog tables.
+**Purpose:** Delta Lake medallion table schemas and create-if-missing helpers for Unity Catalog.
 
 ## Contents
 
-- `schema.py` - table definitions and `ensure_bronze_tables` to create bronze tables if missing
-- `__init__.py` - re-exports `ensure_bronze_tables`
+- `schema.py` - table DDLs plus `ensure_bronze_tables`, `ensure_silver_tables`,
+  `ensure_gold_tables`, and `ensure_medallion_tables`
+- `__init__.py` - re-exports the ensure helpers
+
+## Layer map
+
+| Layer | Tables |
+|-------|--------|
+| bronze | `transactions`, `transaction_identities`, `train_features` |
+| silver | `transactions`, `transaction_identities` |
+| gold | `behavioral_features`, `fraud_alerts` |
 
 ## Related
 
 - [fraud_scoring_engine/README.md](../README.md)
-- [ingest/README.md](../ingest/README.md) - writes data into these tables
-- [scripts/README.md](../../../scripts/README.md) - pipeline commands that call `ensure_bronze_tables`
+- [ingest/README.md](../ingest/README.md) - writes bronze tables
+- [silver/README.md](../silver/README.md) - promotes bronze → silver
+- [scripts/README.md](../../../scripts/README.md) - pipeline commands
