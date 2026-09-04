@@ -13,4 +13,4 @@
 - [fraud_scoring_engine/README.md](../README.md)
 - [preprocessing/README.md](../preprocessing/README.md) - feature preprocessing after frame assembly
 - [notebooks/README.md](../../../notebooks/README.md) - XGBoost training experiments
-- [scripts/README.md](../../../scripts/README.md) - `generate_training_data.py` for behavioral features
+- [scripts/README.md](../../../scripts/README.md) - `generate_behavioral_features.py` materializes gold behavioral features (training recomputes on the fly)

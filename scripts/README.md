@@ -14,7 +14,7 @@ Operational commands for the fraud-scoring-engine medallion pipeline on Databric
 1. Download IEEE data to the bronze Volume
 2. Ensure medallion Delta tables
 3. Ingest to bronze (+ promote silver by default)
-4. Generate gold behavioral features
+4. Materialize gold behavioral features (optional / scheduled)
 5. Train XGBoost (notebook)
 
 ### 1. Download data
@@ -74,12 +74,26 @@ python scripts/promote_silver.py
 python scripts/ingest_ieee_transactions.py
 ```
 
-### 4. Generate gold behavioral features
+### 4. Materialize gold behavioral features
 Computes rolling velocity, spend, and amount-ratio features from
 `fraud.silver.transactions` and overwrites `fraud.gold.behavioral_features`.
+This is an optional gold snapshot for inspection or scheduled (e.g. nightly)
+jobs. Training does **not** read this table; it recomputes the same features
+on the fly from silver.
 
+#### Dev pass (10k rows)
 ```bash
-python scripts/generate_training_data.py --limit 10000
+python scripts/generate_behavioral_features.py --limit 10000
+```
+
+#### Full export (all silver transactions)
+```bash
+python scripts/generate_behavioral_features.py --limit -1
+```
+
+#### Dry run
+```bash
+python scripts/generate_behavioral_features.py --limit 10000 --dry-run
 ```
 
 ### 5. Train XGBoost (notebook)

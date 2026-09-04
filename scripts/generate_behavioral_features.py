@@ -1,8 +1,14 @@
-"""Generate gold behavioral training features from silver Delta transactions.
+"""Materialize gold behavioral features from silver Delta transactions.
+
+Computes rolling velocity, spend, and amount-ratio features for transactions
+in ``fraud.silver.transactions`` and overwrites ``fraud.gold.behavioral_features``.
+Intended for scheduled (e.g. nightly) runs; training recomputes the same
+features on the fly and does not read this table.
 
 Usage:
-    python scripts/generate_training_data.py --limit 10000
-    python scripts/generate_training_data.py --limit 10000 --dry-run
+    python scripts/generate_behavioral_features.py --limit 10000
+    python scripts/generate_behavioral_features.py --limit -1
+    python scripts/generate_behavioral_features.py --limit 10000 --dry-run
 
 Prerequisites:
     - ``fraud.silver.transactions`` populated (see ingest / promote_silver)
@@ -33,7 +39,10 @@ def parse_args() -> argparse.Namespace:
         "--limit",
         type=int,
         default=10_000,
-        help="Maximum number of transactions to export (default: 10000).",
+        help=(
+            "Maximum number of transactions to export in chronological order "
+            "(default: 10000). Use a negative value to export all rows."
+        ),
     )
     parser.add_argument(
         "--dry-run",
