@@ -9,7 +9,7 @@ Each folder has a README explaining its purpose. Start here to find your way aro
 
 | Folder | Description |
 |--------|-------------|
-| [`.github/`](.github/README.md) | GitHub automation and CI configuration |
+| [`.github/`](.github/workflows/README.md) | GitHub automation and CI configuration |
 | [`docs/`](docs/README.md) | Architecture diagrams and design artifacts |
 | [`notebooks/`](notebooks/README.md) | EDA, ingest validation, and XGBoost training notebooks |
 | [`scripts/`](scripts/README.md) | Operational CLI commands for the bronze pipeline |
