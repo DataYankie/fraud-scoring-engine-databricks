@@ -8,5 +8,5 @@
 
 ## Related
 
-- [.github/README.md](../README.md)
+- [Root README](../../README.md)
 - [tests/README.md](../../tests/README.md)
