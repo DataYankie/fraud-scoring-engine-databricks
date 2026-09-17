@@ -1,5 +1,5 @@
 # Fraud Scoring Engine
-> 🚧 **Status:** Under active development - medallion ingest on Databricks Volumes + Delta; training experiments and scoring service coming next.
+> 🚧 **Status:** Under active development — core medallion ingest on Databricks Volumes + Delta is in place; training pipeline and scoring service coming next.
 
 End-to-end system for scoring payment transactions for fraud risk, built around the [IEEE-CIS Fraud Detection](https://www.kaggle.com/c/ieee-fraud-detection) dataset.
 
@@ -9,7 +9,7 @@ Each folder has a README explaining its purpose. Start here to find your way aro
 
 | Folder | Description |
 |--------|-------------|
-| [`.github/`](.github/README.md) | GitHub automation and CI configuration |
+| [`.github/`](.github/workflows/README.md) | GitHub automation and CI configuration |
 | [`docs/`](docs/README.md) | Architecture diagrams and design artifacts |
 | [`notebooks/`](notebooks/README.md) | EDA, ingest validation, and XGBoost training notebooks |
 | [`resources/jobs/`](resources/jobs/README.md) | DAB job definitions for pipeline automation |
