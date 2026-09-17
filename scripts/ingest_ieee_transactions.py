@@ -22,6 +22,7 @@ Prerequisites:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 from fraud_scoring_engine.ingest.loader import ingest_train_transactions
@@ -66,11 +67,30 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip bronze → silver promotion after operational MERGE.",
     )
+    parser.add_argument(
+        "--catalog",
+        type=str,
+        default=None,
+        help="Unity Catalog name (overrides FRAUD_CATALOG env var).",
+    )
+    parser.add_argument(
+        "--schema-bronze",
+        type=str,
+        default=None,
+        help="Bronze schema name (overrides FRAUD_BRONZE_SCHEMA env var).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    
+    # Set environment variables from CLI arguments if provided
+    if args.catalog:
+        os.environ["FRAUD_CATALOG"] = args.catalog
+    if args.schema_bronze:
+        os.environ["FRAUD_BRONZE_SCHEMA"] = args.schema_bronze
+    
     ingest_train_transactions(
         data_dir=args.data_dir,
         limit=args.limit,

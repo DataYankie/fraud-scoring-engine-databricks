@@ -12,6 +12,7 @@ Each folder has a README explaining its purpose. Start here to find your way aro
 | [`.github/`](.github/README.md) | GitHub automation and CI configuration |
 | [`docs/`](docs/README.md) | Architecture diagrams and design artifacts |
 | [`notebooks/`](notebooks/README.md) | EDA, ingest validation, and XGBoost training notebooks |
+| [`resources/jobs/`](resources/jobs/README.md) | DAB job definitions for pipeline automation |
 | [`scripts/`](scripts/README.md) | Operational CLI commands for the bronze pipeline |
 | [`src/`](src/README.md) | Python package source (`fraud_scoring_engine`) |
 | [`tests/`](tests/README.md) | pytest suite for the library |
@@ -43,16 +44,65 @@ Python, Databricks (Spark + Delta + Unity Catalog Volumes), scikit-learn/XGBoost
 
 4. Run the data pipeline (see [scripts/README.md](scripts/README.md)).
 
+## Job deployment (Declarative Automation Bundles)
+
+This project uses **Declarative Automation Bundles (DABs)** to manage jobs declaratively. All job definitions are in `resources/jobs/*.yml`.
+
+### Prerequisites
+* Databricks CLI installed: `pip install databricks-cli`
+* Authenticated to your workspace: `databricks configure`
+* Catalogs created: `fraud_dev` (for dev) and `fraud` (for prod)
+
+### Deploy jobs
+
+```bash
+cd /<path-to-this-repo>/fraud-scoring-engine
+
+# Deploy to dev environment (uses fraud_dev catalog)
+databricks bundle deploy
+
+# Deploy to prod environment (uses fraud catalog)
+databricks bundle deploy -t prod
+```
+
+This creates/updates three jobs:
+* **Ingesting** - Ingest raw data to bronze, promote to silver
+* **Generete behavioral features** - Generate features from silver to gold
+* **Run integration tests** - Run pytest integration tests
+
+### Run a deployed job
+
+```bash
+# Run in dev
+databricks bundle run Ingesting
+
+# Run in prod
+databricks bundle run Ingesting -t prod
+```
+
+### Job recovery
+
+If jobs are accidentally deleted, simply re-run `databricks bundle deploy` to recreate them from the YAML definitions.
+
 ### Defaults (override with env)
 | Setting | Env var | Default |
 |---------|---------|---------|
-| Catalog | `FRAUD_CATALOG` | `fraud` |
-| Bronze schema | `FRAUD_BRONZE_SCHEMA` (or legacy `FRAUD_SCHEMA`) | `bronze` |
+| Catalog | `FRAUD_CATALOG` | `fraud_dev` |
+| Bronze schema | `FRAUD_BRONZE_SCHEMA` | `bronze` |
 | Silver schema | `FRAUD_SILVER_SCHEMA` | `silver` |
 | Gold schema | `FRAUD_GOLD_SCHEMA` | `gold` |
 | Volume | `FRAUD_VOLUME` | `data` |
 
-Raw CSVs: `/Volumes/fraud/bronze/data/raw/`  
-Bronze: `fraud.bronze.transactions`, `fraud.bronze.transaction_identities`, `fraud.bronze.train_features`  
-Silver: `fraud.silver.transactions`, `fraud.silver.transaction_identities`  
-Gold: `fraud.gold.behavioral_features`, `fraud.gold.fraud_alerts`
+### Medallion architecture paths
+
+**Development (default):**
+- Raw CSVs: `/Volumes/fraud_dev/bronze/data/raw/`
+- Bronze: `fraud_dev.bronze.transactions`, `fraud_dev.bronze.transaction_identities`, `fraud_dev.bronze.train_features`
+- Silver: `fraud_dev.silver.transactions`, `fraud_dev.silver.transaction_identities`
+- Gold: `fraud_dev.gold.behavioral_features`, `fraud_dev.gold.fraud_alerts`
+
+**Production:**
+- Raw CSVs: `/Volumes/fraud/bronze/data/raw/`
+- Bronze: `fraud.bronze.transactions`, `fraud.bronze.transaction_identities`, `fraud.bronze.train_features`
+- Silver: `fraud.silver.transactions`, `fraud.silver.transaction_identities`
+- Gold: `fraud.gold.behavioral_features`, `fraud.gold.fraud_alerts`

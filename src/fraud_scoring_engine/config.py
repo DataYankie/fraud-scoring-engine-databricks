@@ -17,8 +17,8 @@ from pathlib import Path
 
 
 def get_catalog() -> str:
-    """Return the Unity Catalog name (default ``fraud``)."""
-    return os.environ.get("FRAUD_CATALOG", "fraud")
+    """Return the Unity Catalog name (default ``fraud_dev``)."""
+    return os.environ.get("FRAUD_CATALOG", "fraud_dev")
 
 
 def get_bronze_schema() -> str:

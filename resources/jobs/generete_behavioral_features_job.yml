@@ -1,0 +1,34 @@
+resources:
+  jobs:
+    Generete_behavioral_features:
+      name: Generete behavioral features
+      schedule:
+        quartz_cron_expression: 7 0 0 * * ?
+        timezone_id: Europe/Copenhagen
+        pause_status: PAUSED
+      tasks:
+        - task_key: Generete_behavioral_features
+          spark_python_task:
+            python_file: /Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine/scripts/generate_behavioral_features.py
+            parameters:
+              - --limit
+              - "10000"
+              - --catalog
+              - ${var.catalog}
+              - --schema-silver
+              - ${var.schema_silver}
+              - --schema-gold
+              - ${var.schema_gold}
+          environment_key: Generete_behavioral_features_environment
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+        - environment_key: Generete_behavioral_features_environment
+          spec:
+            dependencies:
+              - /Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine
+            environment_version: "5"
+      performance_target: STANDARD

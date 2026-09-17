@@ -1,0 +1,41 @@
+resources:
+  jobs:
+    Ingesting:
+      name: Ingesting
+      tasks:
+        - task_key: Run_ingesting_to_bronze
+          spark_python_task:
+            python_file: /Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine/scripts/ingest_ieee_transactions.py
+            parameters:
+              - --limit
+              - "10000"
+              - --catalog
+              - ${var.catalog}
+              - --schema-bronze
+              - ${var.schema_bronze}
+          environment_key: ingesting_env
+        - task_key: ingest_to_silver
+          depends_on:
+            - task_key: Run_ingesting_to_bronze
+          spark_python_task:
+            python_file: /Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine/scripts/promote_silver.py
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema-bronze
+              - ${var.schema_bronze}
+              - --schema-silver
+              - ${var.schema_silver}
+          environment_key: ingesting_env
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+        - environment_key: ingesting_env
+          spec:
+            dependencies:
+              - /Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine
+            environment_version: "5"
+      performance_target: PERFORMANCE_OPTIMIZED
