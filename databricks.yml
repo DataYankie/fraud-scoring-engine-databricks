@@ -1,0 +1,48 @@
+# Databricks Asset Bundle Configuration
+bundle:
+  name: fraud-scoring-engine
+
+# Include all resource definitions
+include:
+  - resources/**/*.yml
+
+# Variables that can be used across your bundle
+variables:
+  catalog:
+    description: Unity Catalog name for the environment
+    default: fraud_dev
+  
+  # Medallion architecture schemas (same across all environments)
+  schema_bronze:
+    description: Raw ingested data schema
+    default: bronze
+  
+  schema_silver:
+    description: Cleaned and validated data schema
+    default: silver
+  
+  schema_gold:
+    description: Business-ready aggregated data schema
+    default: gold
+
+# Deployment targets (dev, staging, prod)
+targets:
+  # Development target (default)
+  dev:
+    mode: development
+    default: true
+    
+    variables:
+      catalog: fraud_dev
+  
+  # Production target
+  prod:
+    mode: production
+    
+    variables:
+      catalog: fraud
+    
+    # Require explicit approval for production deployments
+    run_as:
+      # service_principal_name: "your-service-principal"
+      user_name: yannickkh@outlook.com

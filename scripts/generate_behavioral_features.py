@@ -19,6 +19,7 @@ Prerequisites:
 from __future__ import annotations
 
 import argparse
+import os
 
 from fraud_scoring_engine.features import (
     compute_transaction_features_dataframe,
@@ -49,11 +50,38 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Compute features but do not write the Delta table.",
     )
+    parser.add_argument(
+        "--catalog",
+        type=str,
+        default=None,
+        help="Unity Catalog name (overrides FRAUD_CATALOG env var).",
+    )
+    parser.add_argument(
+        "--schema-silver",
+        type=str,
+        default=None,
+        help="Silver schema name (overrides FRAUD_SILVER_SCHEMA env var).",
+    )
+    parser.add_argument(
+        "--schema-gold",
+        type=str,
+        default=None,
+        help="Gold schema name (overrides FRAUD_GOLD_SCHEMA env var).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    
+    # Set environment variables from CLI arguments if provided
+    if args.catalog:
+        os.environ["FRAUD_CATALOG"] = args.catalog
+    if args.schema_silver:
+        os.environ["FRAUD_SILVER_SCHEMA"] = args.schema_silver
+    if args.schema_gold:
+        os.environ["FRAUD_GOLD_SCHEMA"] = args.schema_gold
+    
     spark = get_spark()
     limit = None if args.limit < 0 else args.limit
 

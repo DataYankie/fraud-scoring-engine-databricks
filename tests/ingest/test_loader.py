@@ -109,10 +109,10 @@ def _write_extra_transaction_csv(raw_dir: Path) -> None:
 
 def test_ingest_merges_transactions_identities_and_features(
     medallion_tables,
-    tmp_path: Path,
+    test_data_path: Path,
 ) -> None:
     spark = medallion_tables
-    raw = tmp_path / "raw"
+    raw = test_data_path / "raw"
     _write_sample_csvs(raw)
 
     result = ingest_train_transactions(
@@ -159,9 +159,9 @@ def test_ingest_merges_transactions_identities_and_features(
     assert features.count() == 2
 
 
-def test_ingest_merge_is_idempotent(medallion_tables, tmp_path: Path) -> None:
+def test_ingest_merge_is_idempotent(medallion_tables, test_data_path: Path) -> None:
     spark = medallion_tables
-    raw = tmp_path / "raw"
+    raw = test_data_path / "raw"
     _write_sample_csvs(raw)
 
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
@@ -174,10 +174,10 @@ def test_ingest_merge_is_idempotent(medallion_tables, tmp_path: Path) -> None:
 
 def test_ingest_features_merge_appends_new_transactions(
     medallion_tables,
-    tmp_path: Path,
+    test_data_path: Path,
 ) -> None:
     spark = medallion_tables
-    raw = tmp_path / "raw"
+    raw = test_data_path / "raw"
     _write_sample_csvs(raw)
 
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
@@ -196,11 +196,11 @@ def test_ingest_features_merge_appends_new_transactions(
 
 def test_ingest_features_merge_updates_existing_records(
     medallion_tables,
-    tmp_path: Path,
+    test_data_path: Path,
 ) -> None:
     """Verify merge updates existing records rather than duplicating."""
     spark = medallion_tables
-    raw = tmp_path / "raw"
+    raw = test_data_path / "raw"
     _write_sample_csvs(raw)
 
     ingest_train_transactions(spark=spark, data_dir=raw, ensure_tables=False)
@@ -244,9 +244,9 @@ def test_ingest_features_merge_updates_existing_records(
     assert row["V1"] == 0.999
 
 
-def test_ingest_dry_run_writes_nothing(medallion_tables, tmp_path: Path) -> None:
+def test_ingest_dry_run_writes_nothing(medallion_tables, test_data_path: Path) -> None:
     spark = medallion_tables
-    raw = tmp_path / "raw"
+    raw = test_data_path / "raw"
     _write_sample_csvs(raw)
 
     result = ingest_train_transactions(
@@ -261,9 +261,9 @@ def test_ingest_dry_run_writes_nothing(medallion_tables, tmp_path: Path) -> None
     assert spark.table(silver_table("transactions")).count() == 0
 
 
-def test_ingest_skip_silver_leaves_silver_empty(medallion_tables, tmp_path: Path) -> None:
+def test_ingest_skip_silver_leaves_silver_empty(medallion_tables, test_data_path: Path) -> None:
     spark = medallion_tables
-    raw = tmp_path / "raw"
+    raw = test_data_path / "raw"
     _write_sample_csvs(raw)
 
     result = ingest_train_transactions(

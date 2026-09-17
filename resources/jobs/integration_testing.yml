@@ -1,0 +1,25 @@
+resources:
+  jobs:
+    Run_integration_tests:
+      name: Run integration tests
+      schedule:
+        quartz_cron_expression: 55 0 0 * * ?
+        timezone_id: Europe/Copenhagen
+        pause_status: PAUSED
+      tasks:
+        - task_key: run_integration_tests
+          spark_python_task:
+            python_file: /Workspace/Users/yannicckh@outlook.com/fraud-scoring-engine/scripts/run_integration_tests.py
+          environment_key: run_integration_tests_environment
+      queue:
+        enabled: true
+      environments:
+        - environment_key: Default
+          spec:
+            environment_version: "5"
+        - environment_key: run_integration_tests_environment
+          spec:
+            dependencies:
+              - /Workspace/Users/yannickkh@outlook.com/fraud-scoring-engine
+            environment_version: "5"
+      performance_target: STANDARD

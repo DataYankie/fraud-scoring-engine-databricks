@@ -11,7 +11,7 @@ pytestmark = pytest.mark.unit
 
 def test_ieee_data_paths_defaults_to_volume() -> None:
     paths = ieee_data_paths()
-    assert paths.data_dir == Path("/Volumes/fraud/bronze/data/raw")
+    assert paths.data_dir == Path("/Volumes/fraud_dev/bronze/data/raw")
     assert paths.train_transaction.name == "train_transaction.csv"
     assert paths.train_identity.name == "train_identity.csv"
 

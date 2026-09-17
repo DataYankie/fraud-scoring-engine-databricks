@@ -162,7 +162,7 @@ def ingest_train_transactions(
     dry_run: bool = False,
     skip_tables: bool = False,
     skip_features: bool = False,
-    promote_silver: bool = True,
+    promote_silver: bool = False,
     ensure_tables: bool = True,
 ) -> IngestResult:
     """Load train IEEE data from Volume CSVs into bronze Delta tables.
