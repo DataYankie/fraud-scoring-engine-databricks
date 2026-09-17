@@ -23,18 +23,18 @@ pytestmark = pytest.mark.unit
 
 
 def test_defaults() -> None:
-    assert get_catalog() == "fraud"
+    assert get_catalog() == "fraud_dev"
     assert get_bronze_schema() == "bronze"
     assert get_silver_schema() == "silver"
     assert get_gold_schema() == "gold"
     assert get_volume_name() == "data"
-    assert volume_root() == "/Volumes/fraud/bronze/data"
-    assert bronze_table("transactions") == "fraud.bronze.transactions"
-    assert silver_table("transactions") == "fraud.silver.transactions"
-    assert silver_table("transaction_identities") == "fraud.silver.transaction_identities"
-    assert bronze_table("train_features") == "fraud.bronze.train_features"
-    assert gold_table("behavioral_features") == "fraud.gold.behavioral_features"
-    assert gold_table("fraud_alerts") == "fraud.gold.fraud_alerts"
+    assert volume_root() == "/Volumes/fraud_dev/bronze/data"
+    assert bronze_table("transactions") == "fraud_dev.bronze.transactions"
+    assert silver_table("transactions") == "fraud_dev.silver.transactions"
+    assert silver_table("transaction_identities") == "fraud_dev.silver.transaction_identities"
+    assert bronze_table("train_features") == "fraud_dev.bronze.train_features"
+    assert gold_table("behavioral_features") == "fraud_dev.gold.behavioral_features"
+    assert gold_table("fraud_alerts") == "fraud_dev.gold.fraud_alerts"
     assert get_mlflow_tracking_uri() == "databricks"
 
 
@@ -54,7 +54,7 @@ def test_legacy_fraud_schema_sets_bronze(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("FRAUD_SCHEMA", "legacy_bronze")
     monkeypatch.delenv("FRAUD_BRONZE_SCHEMA", raising=False)
     assert get_bronze_schema() == "legacy_bronze"
-    assert volume_root() == "/Volumes/fraud/legacy_bronze/data"
+    assert volume_root() == "/Volumes/fraud_dev/legacy_bronze/data"
 
 
 def test_get_mlflow_tracking_uri_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,4 +76,4 @@ def test_get_mlflow_artifact_root_databricks_default(
 ) -> None:
     monkeypatch.setenv("DATABRICKS_RUNTIME_VERSION", "15.4")
     monkeypatch.delenv("MLFLOW_ARTIFACT_ROOT", raising=False)
-    assert get_mlflow_artifact_root() == Path("/Volumes/fraud/bronze/data/mlartifacts")
+    assert get_mlflow_artifact_root() == Path("/Volumes/fraud_dev/bronze/data/mlartifacts")
